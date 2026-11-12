@@ -54,6 +54,13 @@ struct Filt {
     nx: i64[1024];                // the continuation: the node that takes this node's outputs, -1 the terminal of the enclosing scope body
     at: i64[1024];                // position in the filter text, for errors
     nast: i64;
+    ae: i64[1024];
+    nvar: i64;                    // variables in scope while parsing, and all variables made
+    nvars: i64;
+    vname_off: i64[64];
+    vname_len: i64[64];
+    vslot: i64[64];
+    vctx: i64[64];                // the automaton node a variable's value came from, -1 unknown
     // object constructors: key expression and value expression
     okey: i64[256];
     oval: i64[256];
@@ -166,6 +173,22 @@ struct Ev {
     tmp2: utf8<1048576>;
     tmp3: utf8<1048576>;
     stk: i64[64];
+    ms_kind: i64[260];            // materialize: the open containers
+    ms_head: i64[260];
+    ms_tail: i64[260];
+    ms_cnt: i64[260];
+    ms_key: i64[260];
+    vars: i64[64];                // variables: the value, the input of the body
+    vin: i64[64];
+    errv: i64;                    // the value of the last error (an entry), -1 none
+    errfrom: i64;                 // the try whose continuation failed
+    stopto: i64;                  // the limit or first that wants the enumeration to stop
+    tc: i64[64];                  // terminal frames: a count, a held value, a limit
+    th: i64[64];
+    tn: i64[64];
+    rstate: i64[64];              // reduce: the state
+    rerrv: i64[64];               // a deferred error's value
+    rec: i64;                     // recursion depth of the value functions
     hnull: i64;
     htrue: i64;
     hfalse: i64;
@@ -173,6 +196,7 @@ struct Ev {
     harr0: i64;                   // an empty array
     nanv: f64;
     emsg: utf8<300>;
+    rawmsg: utf8<300>;
 }
 
 struct J {
@@ -190,6 +214,11 @@ struct J {
     an_depth: i64;                // compile: body nesting depth
     an_unit: i64;                 // compile: the unit node of the body being analyzed
     cdepth: i64;
+    wv_used: i64;
+    wv_bound: i64;
+    noas: i64;                    // compile: 1 while the source of reduce is parsed (an `as` belongs to the reduce)
+    pn: i64;                      // compile: arguments parsed by parse_args
+    pa: i64[4];
 }
 state jj: J;
 

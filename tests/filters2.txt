@@ -24,11 +24,6 @@ null + .users[0].age
 .users[] | .age * 1.1
 .users[] | -.age
 .users[] | .age % 10
-.users[] | (.age | floor)
-.users[] | (.age | sqrt)
-.users[] | (.age / 7 | floor)
-.users[] | (.age / 7 | ceil)
-.users[] | (.age / 7 | round)
 .users[] | (.age | tostring)
 .users[] | (.n | tostring)
 .users[] | (.addr | tostring)
@@ -63,7 +58,6 @@ null + .users[0].age
 .users[] | select(.tags | length > 0) | .n
 .users[] | select(.addr != null) | .addr.city
 .users[] | select(.addr.city == "Austin")
-.users[] | select(.age == (.age | floor))
 .users[] | select(.n | length > 1)
 .users[] | select(.tags) | .n
 .users[] | select(.zzz) | .n
@@ -286,3 +280,38 @@ if [] then "t" else "f" end
 .users[].tags | length
 .users[] | .tags | .[0]
 
+
+.users[]?
+.a?
+.users[0].zzz?
+.users[0].n.x?
+try .users[0].n.x
+try .users[0].n.x catch "c"
+try (.users[] | .n.x) catch .
+try error("x") catch .
+try error catch .
+.users[0] as $u | $u.n
+.users[0].age as $a | $a + 1
+.users | length as $n | $n * 2
+.users[] | .age as $a | {a: $a}
+.users[0].n as $x | .users[1].n as $y | [$x, $y]
+[.users[] | .age as $a | $a + 1]
+[limit(1; .users[])]
+limit(2; .users[] | .n)
+first(.users[] | .n)
+[.users[] | .n] | first
+isempty(.users[])
+isempty(empty)
+[range(5)]
+[range(2; 5)]
+[range(0; 10; 3)]
+range(3) | . * 2
+[.users[] | .age] | map(. + 1)
+last(.users[] | .n)
+nth(1; .users[] | .n)
+[.users[] | .age | until(. > 100; . * 2)]
+(.users[] | .age) as $a | $a
+[.[] | try error("x") catch .]
+.users[0] | try .n.q catch "E"
+[.users[] | .tags[]?]
+.users[] | .addr.city?

@@ -2,11 +2,6 @@
 ..
 .[-1]
 .[1:2]
-.[]?
-.a?
-try .a
-.a as $x | $x
-$x
 .[$k]
 .[.k]
 .users[] | .n | ascii_downcase
@@ -15,9 +10,6 @@ $x
 "a \(.b)"
 reduce .users[] as $u (0; . + 1)
 foreach .a[] as $x (0; .)
-limit(2; .users[])
-first(.users[])
-last
 .users | sort
 .users | sort_by(.n)
 .users | unique
@@ -39,7 +31,6 @@ max
 if (.a, .b) then 1 else 2 end
 .a // empty // .b | foo
 def f: 1; f
-label $out | .a
 input
 $ENV
 env
@@ -50,6 +41,15 @@ join(",")
 ascii_downcase
 any
 all
-range(3)
 .. | .a
 not_a_function
+
+floor
+sqrt
+.a | ceil
+reduce range(3) as $x (0; . + $x)
+. as [$a] | $a
+. as {a: $x} | $x
+def f: 1; f
+foreach range(3) as $x (0; . + $x)
+

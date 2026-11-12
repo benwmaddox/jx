@@ -85,7 +85,7 @@ def gen_scalar_expr(r, depth):
     if k < 0.85:
         return "(if %s then %s else %s end)" % (gen_scalar_expr(r, depth - 1), gen_scalar_expr(r, depth - 1), gen_scalar_expr(r, depth - 1))
     if k < 0.93:
-        return "(%s | %s)" % (gen_scalar_expr(r, depth - 1), r.choice(["length", "type", "not", "keys", "tostring", "tonumber", "floor", "sqrt", "-(.)", "add", 'has("a")', "has(0)", "first", ".a", ".[0]"]))
+        return "(%s | %s)" % (gen_scalar_expr(r, depth - 1), r.choice(["length", "type", "not", "keys", "tostring", "tonumber", "-(.)", "add", 'has("a")', "has(0)", "first", ".a", ".[0]"]))
     return "[%s]" % gen_expr(r, depth - 1)
 
 

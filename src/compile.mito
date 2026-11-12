@@ -11,11 +11,13 @@ const K {
     ID: i64 = 1; LIT: i64 = 2; NODE: i64 = 3; FIELD: i64 = 4; IDX: i64 = 5; ITER: i64 = 6; PIPE: i64 = 7; COMMA: i64 = 8;
     ALT: i64 = 9; BIN: i64 = 10; AND: i64 = 11; OR: i64 = 12; NEG: i64 = 13; IF: i64 = 14; ARR: i64 = 15; OBJ: i64 = 16;
     FN: i64 = 17; SELECT: i64 = 18; EMPTY: i64 = 19; CMPLIT: i64 = 20; FOLD: i64 = 21; PLAY: i64 = 22;
+    TRY: i64 = 23; VAR: i64 = 24; AS: i64 = 25; VARBIND: i64 = 26; REDUCE: i64 = 27; RBIND: i64 = 28; RANGE: i64 = 29;
+    LIMIT: i64 = 30; UNTIL: i64 = 31; ERROR: i64 = 32;
 }
 
 const F {
     LENGTH: i64 = 1; TYPE: i64 = 2; KEYS: i64 = 3; HAS: i64 = 4; NOT: i64 = 5; ADD: i64 = 6; TOSTRING: i64 = 7; TONUMBER: i64 = 8;
-    FLOOR: i64 = 9; CEIL: i64 = 10; ROUND: i64 = 11; SQRT: i64 = 12; FABS: i64 = 13;
+    FLOOR: i64 = 9; CEIL: i64 = 10; ROUND: i64 = 11; SQRT: i64 = 12; FABS: i64 = 13; TOJSON: i64 = 14;
 }
 
 fn reject(what: text, p: i64) -> i64 {
@@ -220,6 +222,49 @@ fn parse_key(f: text, q: i64) -> i64 {
     return ko;
 }
 
+// the arguments of a builtin written (a; b; c): parsed into jj.pa, counted in jj.pn; false on error
+fn parse_args(f: text, name: text, lo: i64, hi: i64) -> bool {
+    var q = skip_ws(f, jj.cp);
+    if byte_at(f, q) != 40 { syntax("`" + name + "` needs its arguments in parentheses", q); return false; }
+    jj.cp = q + 1;
+    var cnt = 0;
+    var a0 = -1;
+    var a1 = -1;
+    var a2 = -1;
+    while true {
+        let a = parse_expr(f, 1);
+        if a < 0 { return false; }
+        if cnt >= hi { reject("more than " + str(hi) + " arguments to `" + name + "`", q); return false; }
+        if cnt == 0 { a0 = a; } else if cnt == 1 { a1 = a; } else { a2 = a; }
+        cnt += 1;
+        q = skip_ws(f, jj.cp);
+        if byte_at(f, q) == 59 { jj.cp = q + 1; continue; }
+        if byte_at(f, q) == 41 { jj.cp = q + 1; break; }
+        syntax("expected ; or ) in the arguments of `" + name + "`", q);
+        return false;
+    }
+    if cnt < lo { syntax("`" + name + "` needs " + str(lo) + " arguments", q); return false; }
+    jj.pa[0] = a0;
+    jj.pa[1] = a1;
+    jj.pa[2] = a2;
+    jj.pn = cnt;
+    return true;
+}
+
+// the variable named keys[...] in scope, else -1
+fn find_var(f: text, q: i64, e: i64) -> i64 {
+    var k = jj.f.nvar - 1;
+    while k >= 0 {
+        if jj.f.vname_len[k] == e - q && substr(jj.f.keys, jj.f.vname_off[k], e - q) == substr(f, q, e - q) { return jj.f.vslot[k]; }
+        k -= 1;
+    }
+    return -1;
+}
+
+fn const_num(n: i64) -> i64 {
+    return mk(K.LIT, new_const(4, 4, n, 0), 0, 0, 0);
+}
+
 fn parse_postfix(f: text, t0: i64) -> i64 {
     var t = t0;
     while t >= 0 {
@@ -276,8 +321,12 @@ fn parse_postfix(f: text, t0: i64) -> i64 {
             reject("an expression inside [...]", q);
             return -1;
         }
-        if c == 63 { reject("the `?` operator", q); return -1; }
-        if is_word(f, q, "as") { reject("variables (`as`)", q); return -1; }
+        if c == 63 {
+            t = mk(K.TRY, t, -1, 0, q);
+            jj.cp = q + 1;
+            continue;
+        }
+        if is_word(f, q, "as") && jj.noas == 0 { break; }
         break;
     }
     return t;
@@ -472,7 +521,19 @@ fn parse_primary(f: text) -> i64 {
         jj.cp = q + 1;
         return parse_object(f, q);
     }
-    if c == 36 { reject("variables (`$name`)", q); return -1; }
+    if c == 36 {
+        var e = q + 1;
+        while is_name_char(byte_at(f, e)) { e += 1; }
+        if e == q + 1 { return syn1("a variable name is needed after `$`", q); }
+        let slot = find_var(f, q + 1, e);
+        if slot < 0 {
+            if substr(f, q + 1, e - q - 1) == "__loc__" { return rej1("`$__loc__`", q); }
+            if substr(f, q + 1, e - q - 1) == "ENV" { return rej1("`$ENV`", q); }
+            return syn1("$" + substr(f, q + 1, e - q - 1) + " is not defined", q);
+        }
+        jj.cp = e;
+        return mk(K.VAR, 0, 0, slot, q);
+    }
     if c == 64 { reject("a format string (`@...`)", q); return -1; }
     if is_name_start(c) {
         var e = q;
@@ -491,13 +552,112 @@ fn parse_primary(f: text) -> i64 {
         if w == "add" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.ADD, q); }
         if w == "tostring" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.TOSTRING, q); }
         if w == "tonumber" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.TONUMBER, q); }
-        if w == "floor" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.FLOOR, q); }
-        if w == "ceil" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.CEIL, q); }
-        if w == "round" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.ROUND, q); }
-        if w == "sqrt" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.SQRT, q); }
-        if w == "fabs" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.FABS, q); }
+        if w == "try" {
+            let b0 = parse_primary(f);
+            if b0 < 0 { return -1; }
+            let b = parse_postfix(f, b0);
+            if b < 0 { return -1; }
+            var h = -1;
+            let q2 = skip_ws(f, jj.cp);
+            if is_word(f, q2, "catch") {
+                jj.cp = q2 + 5;
+                let h0 = parse_primary(f);
+                if h0 < 0 { return -1; }
+                h = parse_postfix(f, h0);
+                if h < 0 { return -1; }
+            }
+            return mk(K.TRY, b, h, 0, q);
+        }
+        if w == "error" {
+            let q2 = skip_ws(f, jj.cp);
+            if byte_at(f, q2) == 40 {
+                let a = parse_arg(f, w);
+                if a < 0 { return -1; }
+                return mk(K.ERROR, a, 0, 0, q);
+            }
+            return mk(K.ERROR, mk(K.ID, 0, 0, 0, q), 0, 0, q);
+        }
+        if w == "range" {
+            if !parse_args(f, w, 1, 3) { return -1; }
+            if jj.pn == 1 { return mk(K.RANGE, const_num(0), jj.pa[0], const_num(1), q); }
+            if jj.pn == 2 { return mk(K.RANGE, jj.pa[0], jj.pa[1], const_num(1), q); }
+            return mk(K.RANGE, jj.pa[0], jj.pa[1], jj.pa[2], q);
+        }
+        if w == "limit" {
+            if !parse_args(f, w, 2, 2) { return -1; }
+            return mk(K.LIMIT, jj.pa[0], jj.pa[1], 1, q);
+        }
+        if w == "nth" {
+            if !parse_args(f, w, 2, 2) { return -1; }
+            return mk(K.LIMIT, jj.pa[0], jj.pa[1], 5, q);
+        }
+        if w == "isempty" {
+            if !parse_args(f, w, 1, 1) { return -1; }
+            return mk(K.LIMIT, -1, jj.pa[0], 3, q);
+        }
+        if w == "until" {
+            if !parse_args(f, w, 2, 2) { return -1; }
+            return mk(K.UNTIL, jj.pa[0], jj.pa[1], 0, q);
+        }
+        if w == "last" {
+            let q2 = skip_ws(f, jj.cp);
+            if byte_at(f, q2) != 40 { return rej1("`last` without an argument (it needs the array's length)", q); }
+            if !parse_args(f, w, 1, 1) { return -1; }
+            return mk(K.LIMIT, -1, jj.pa[0], 4, q);
+        }
+        if w == "reduce" { return rej1("`reduce` (Stage 3)", q); }
+        if w == "reduce_unreachable" {
+            jj.noas = jj.noas + 1;
+            let s0 = parse_primary(f);
+            if s0 < 0 { return -1; }
+            let src = parse_postfix(f, s0);
+            jj.noas = jj.noas - 1;
+            if src < 0 { return -1; }
+            var e = skip_ws(f, jj.cp);
+            if !is_word(f, e, "as") { return syn1("expected `as` in reduce", e); }
+            e = skip_ws(f, e + 2);
+            if byte_at(f, e) != 36 { return rej1("destructuring patterns in reduce", e); }
+            let ns = e + 1;
+            e = ns;
+            while is_name_char(byte_at(f, e)) { e += 1; }
+            if jj.f.nvars >= 60 { jj.err = "jx: too many variables in the filter"; return -1; }
+            let slot = jj.f.nvars;
+            jj.f.nvars += 1;
+            let lo = len(jj.f.keys);
+            jj.f.keys += substr(f, ns, e - ns);
+            jj.cp = e;
+            let q2 = skip_ws(f, e);
+            if byte_at(f, q2) != 40 { return syn1("expected ( after the reduce variable", q2); }
+            // init is outside the scope of the variable, update inside
+            jj.cp = q2 + 1;
+            let init = parse_expr(f, 1);
+            if init < 0 { return -1; }
+            let q3 = skip_ws(f, jj.cp);
+            if byte_at(f, q3) != 59 { return syn1("expected ; in reduce", q3); }
+            jj.cp = q3 + 1;
+            let save = jj.f.nvar;
+            jj.f.vname_off[jj.f.nvar] = lo;
+            jj.f.vname_len[jj.f.nvar] = e - ns;
+            jj.f.vslot[jj.f.nvar] = slot;
+            jj.f.nvar += 1;
+            let upd = parse_expr(f, 1);
+            jj.f.nvar = save;
+            if upd < 0 { return -1; }
+            let q4 = skip_ws(f, jj.cp);
+            if byte_at(f, q4) == 59 { return rej1("foreach-style extract in reduce", q4); }
+            if byte_at(f, q4) != 41 { return syn1("expected ) after reduce", q4); }
+            jj.cp = q4 + 1;
+            let rn = mk(K.REDUCE, src, upd, slot, q);
+            if rn < 0 { return -1; }
+            jj.f.ad[rn] = init;
+            return rn;
+        }
         if w == "first" {
-            if !no_args(f, w) { return -1; }
+            let q2 = skip_ws(f, jj.cp);
+            if byte_at(f, q2) == 40 {
+                if !parse_args(f, w, 1, 1) { return -1; }
+                return mk(K.LIMIT, const_num(1), jj.pa[0], 1, q);
+            }
             return mk(K.IDX, mk(K.ID, 0, 0, 0, q), 0, 0, q);
         }
         if w == "has" {
@@ -585,6 +745,32 @@ fn parse_expr(f: text, minp: i64) -> i64 {
     var last_cmp = false;
     while true {
         let q = skip_ws(f, jj.cp);
+        if is_word(f, q, "as") && jj.noas == 0 {
+            if minp > 1 { break; }
+            var e = skip_ws(f, q + 2);
+            if byte_at(f, e) != 36 { return rej1("destructuring patterns after `as`", e); }
+            let ns = e + 1;
+            e = ns;
+            while is_name_char(byte_at(f, e)) { e += 1; }
+            if e == ns { return syn1("a variable name is needed after `$`", ns); }
+            if jj.f.nvars >= 60 { jj.err = "jx: too many variables in the filter"; return -1; }
+            let slot = jj.f.nvars;
+            jj.f.nvars += 1;
+            let lo = len(jj.f.keys);
+            jj.f.keys += substr(f, ns, e - ns);
+            let q2 = skip_ws(f, e);
+            if byte_at(f, q2) != 124 { return syn1("expected `|` after the variable", q2); }
+            jj.cp = q2 + 1;
+            let save = jj.f.nvar;
+            jj.f.vname_off[jj.f.nvar] = lo;
+            jj.f.vname_len[jj.f.nvar] = e - ns;
+            jj.f.vslot[jj.f.nvar] = slot;
+            jj.f.nvar += 1;
+            let body = parse_expr(f, 1);
+            jj.f.nvar = save;
+            if body < 0 { return -1; }
+            return mk(K.AS, lhs, body, slot, q);
+        }
         let o = peek_op(f, q);
         if o == 0 { break; }
         if o < 0 { reject("assignment or update operators", q); return -1; }
@@ -615,12 +801,25 @@ fn parse_expr(f: text, minp: i64) -> i64 {
 
 // ---- analysis ----
 
+fn j_lim3(e: i64) -> bool {
+    return jj.f.ac[e] == 3;
+}
+
 // 0 exactly one output, 1 at most one, 2 any number
 fn cls(e: i64) -> i64 {
     let k = jj.f.ak[e];
     if k == K.ITER || k == K.COMMA { return 2; }
     if k == K.PLAY { return 2; }
     if k == K.EMPTY || k == K.SELECT { return 1; }
+    if k == K.TRY || k == K.RANGE { return 2; }
+    if k == K.LIMIT { if j_lim3(e) { return 0; } return 2; }
+    if k == K.AS {
+        let a = cls(jj.f.aa[e]);
+        let b = cls(jj.f.ab[e]);
+        if a == 2 || b == 2 { return 2; }
+        if a == 1 || b == 1 { return 1; }
+        return 0;
+    }
     if k == K.FIELD || k == K.IDX { return cls(jj.f.aa[e]); }
     if k == K.PIPE {
         let a = cls(jj.f.aa[e]);
@@ -755,8 +954,40 @@ fn an_scope(root: i64, it: i64, ctx: i64, nxt: i64, body0: i64, term: i64) -> i6
     return -1;
 }
 
+// bit set of the variables used (jj.wv_used) and bound (jj.wv_bound) in the tree below e
+fn walk_vars(e: i64) {
+    if e < 0 { return; }
+    let k = jj.f.ak[e];
+    if k == K.VAR { jj.wv_used = jj.wv_used | (1 << jj.f.ac[e]); return; }
+    if k == K.ID || k == K.LIT || k == K.NODE || k == K.EMPTY || k == K.CMPLIT || k == K.PLAY || k == K.VARBIND || k == K.RBIND { return; }
+    if k == K.OBJ {
+        var i = 0;
+        while i < jj.f.ab[e] { walk_vars(jj.f.okey[jj.f.aa[e] + i]); walk_vars(jj.f.oval[jj.f.aa[e] + i]); i += 1; }
+        return;
+    }
+    if k == K.AS { jj.wv_bound = jj.wv_bound | (1 << jj.f.ac[e]); }
+    if k == K.IF { walk_vars(jj.f.aa[e]); walk_vars(jj.f.ab[e]); walk_vars(jj.f.ac[e]); return; }
+    if k == K.RANGE { walk_vars(jj.f.aa[e]); walk_vars(jj.f.ab[e]); walk_vars(jj.f.ac[e]); return; }
+    if k == K.FN || k == K.LIMIT { if k == K.FN && jj.f.aa[e] < 0 { return; } walk_vars(jj.f.aa[e]); if k == K.LIMIT { walk_vars(jj.f.ab[e]); } return; }
+    if k == K.ARR || k == K.FOLD { walk_vars(jj.f.aa[e]); return; }
+    if k == K.FIELD || k == K.IDX || k == K.ITER || k == K.NEG || k == K.SELECT || k == K.ERROR { walk_vars(jj.f.aa[e]); return; }
+    walk_vars(jj.f.aa[e]);
+    walk_vars(jj.f.ab[e]);
+}
+
+// does the tree use a variable that is bound outside it?
+fn uses_outer_var(e: i64) -> bool {
+    jj.wv_used = 0;
+    jj.wv_bound = 0;
+    walk_vars(e);
+    return (jj.wv_used - (jj.wv_used & jj.wv_bound)) != 0;
+}
+
 fn is_gen_head(e: i64, ctx: i64) -> bool {
-    if jj.f.ak[e] == K.PIPE { return stream_src(jj.f.aa[e], ctx) >= 0; }
+    if jj.f.ak[e] == K.PIPE {
+        if uses_outer_var(jj.f.ab[e]) { return false; }
+        return stream_src(jj.f.aa[e], ctx) >= 0;
+    }
     return stream_src(e, ctx) >= 0;
 }
 
@@ -850,6 +1081,11 @@ fn an(e: i64, ctx: i64, nxt: i64, direct: bool) -> i64 {
                 return an(e, ctx, nxt, direct);
             }
         }
+        if jj.f.ak[l] == K.ITER && stream_src(l, ctx) >= 0 && uses_outer_var(r) {
+            let rcx = an_scope(l, l, ctx, r, -1, 2);
+            if rcx == -2 { return -2; }
+            return an(r, -1, nxt, false);
+        }
         if jj.f.ak[l] == K.ITER && stream_src(l, ctx) >= 0 {
             var term = 2;
             if direct && nxt < 0 { term = 1; }
@@ -870,7 +1106,7 @@ fn an(e: i64, ctx: i64, nxt: i64, direct: bool) -> i64 {
         return -1;
     }
     if k == K.ALT {
-        if cls(jj.f.aa[e]) != 0 { return reject("a generator on the left of `//`", jj.f.at[e]) - 3; }
+        if cls(jj.f.aa[e]) != 0 { jj.f.ad[e] = 1; }
         if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
         if an(jj.f.ab[e], ctx, nxt, false) == -2 { return -2; }
         return -1;
@@ -967,6 +1203,75 @@ fn an(e: i64, ctx: i64, nxt: i64, direct: bool) -> i64 {
         jj.f.ad[e] = r;
         jj.f.ab[e] = -1;
         if an(body, ctx, -1, false) == -2 { return -2; }
+        return -1;
+    }
+    if k == K.VAR { return jj.f.vctx[jj.f.ac[e]]; }
+    if k == K.AS {
+        let slot = jj.f.ac[e];
+        let vb = mk(K.VARBIND, -1, jj.f.ab[e], slot, jj.f.at[e]);
+        if vb < 0 { return -2; }
+        jj.f.ad[e] = vb;
+        let rc = an(jj.f.aa[e], ctx, vb, false);
+        if rc == -2 { return -2; }
+        jj.f.vctx[slot] = rc;
+        return an(jj.f.ab[e], ctx, nxt, direct);
+    }
+    if k == K.REDUCE {
+        let slot = jj.f.ac[e];
+        let r = new_reg(0);
+        if r < 0 { return -2; }
+        let rb = mk(K.RBIND, -1, jj.f.ab[e], slot, jj.f.at[e]);
+        if rb < 0 { return -2; }
+        jj.f.ad[rb] = r;
+        jj.f.ae[e] = rb;
+        if cls(jj.f.ad[e]) != 0 { return reject("a generator as the initial value of reduce", jj.f.at[e]) - 3; }
+        if an(jj.f.ad[e], ctx, -1, false) == -2 { return -2; }
+        let rc = an(jj.f.aa[e], ctx, rb, false);
+        if rc == -2 { return -2; }
+        jj.f.vctx[slot] = rc;
+        if an(jj.f.ab[e], -1, -1, false) == -2 { return -2; }
+        jj.f.ac[rb] = slot;
+        jj.f.ae[rb] = r;
+        return -1;
+    }
+    if k == K.TRY {
+        if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
+        if jj.f.ab[e] >= 0 { if an(jj.f.ab[e], -1, nxt, false) == -2 { return -2; } }
+        return -1;
+    }
+    if k == K.ERROR {
+        if cls(jj.f.aa[e]) != 0 { return reject("a generator inside `error(...)`", jj.f.at[e]) - 3; }
+        if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
+        return -1;
+    }
+    if k == K.RANGE {
+        var i = 0;
+        while i < 3 {
+            var x = jj.f.aa[e];
+            if i == 1 { x = jj.f.ab[e]; }
+            if i == 2 { x = jj.f.ac[e]; }
+            if cls(x) != 0 { return reject("a generator as an argument of `range`", jj.f.at[e]) - 3; }
+            if an(x, ctx, -1, false) == -2 { return -2; }
+            i += 1;
+        }
+        return -1;
+    }
+    if k == K.LIMIT {
+        if jj.f.aa[e] >= 0 {
+            if cls(jj.f.aa[e]) != 0 {
+                let r = new_reg(0);
+                if r < 0 { return -2; }
+                jj.f.ae[e] = r;
+            }
+            if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
+        }
+        if an(jj.f.ab[e], ctx, -1, false) == -2 { return -2; }
+        return -1;
+    }
+    if k == K.UNTIL {
+        if cls(jj.f.aa[e]) != 0 || cls(jj.f.ab[e]) != 0 { return reject("a generator inside `until`", jj.f.at[e]) - 3; }
+        if an(jj.f.aa[e], -1, -1, false) == -2 { return -2; }
+        if an(jj.f.ab[e], -1, -1, false) == -2 { return -2; }
         return -1;
     }
     if k == K.OBJ {
