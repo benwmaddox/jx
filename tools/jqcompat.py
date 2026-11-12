@@ -250,6 +250,92 @@ def cmd_cases(a):
     print("cases", len(res), "jq", dict(Counter(r["jq"] for r in res)), "jaq", dict(Counter(r["jaq"] for r in res)))
 
 
+# ---------- part 2: builtins, syntax, behavior spot checks, flags ----------
+def probe_pair(a, args, stdin=b"", files=None, timeout=10):
+    """Run args on jq and jaq; {T} in args is a temp dir holding `files`."""
+    with tempfile.TemporaryDirectory(dir=a.out) as td:
+        for k, v in (files or {}).items():
+            open(os.path.join(td, k), "wb").write(v)
+        argv = [x.replace("{T}", td) for x in args]
+        rj = run(a.jq, argv, stdin, timeout)
+        ra = run(a.jaq, argv, stdin, timeout)
+    return rj, ra
+
+
+def classify(rj, ra):
+    ea = ra[2].decode("utf-8", "replace")
+    if rj[0] == ra[0] and rj[1] == ra[1]:
+        return "same"
+    unsup = ("undefined" in ea or "unexpected argument" in ea or "unknown" in ea.lower() or "found argument" in ea
+             or "unrecognized" in ea or (ra[0] == 2 and rj[0] != 2) or (ra[0] == 3 and rj[0] != 3))
+    if unsup and ra[0] != 0:
+        return "unsupported"
+    if rj[1] == ra[1]:
+        return "same-output-different-exit-code"
+    return "differs"
+
+
+def short(b, n=120):
+    return b.decode("utf-8", "replace").replace("\n", "\\n")[:n]
+
+
+def cmd_builtins(a):
+    sys.path.insert(0, HERE)
+    from jqcompat_probes import SPOT, SYNTAX
+    os.makedirs(a.out, exist_ok=True)
+    rc, out, err = run(a.jq, ["-nc", "builtins|sort"])
+    names = json.loads(out)
+    rows = []
+    pf = os.path.join(a.out, "probe.jq")
+    for nm in names:
+        base, ar = nm.rsplit("/", 1)
+        ar = int(ar)
+        body = base + ("(" + ";".join(["."] * ar) + ")" if ar else "")
+        open(pf, "w", encoding="utf-8").write("if false then %s else 0 end" % body)  # compile-only: never executed
+        rj = run(a.jq, ["-nc", "-f", pf])
+        ra = run(a.jaq, ["-nc", "-f", pf])
+        ea = ra[2].decode("utf-8", "replace")
+        st = "defined" if ra[0] == 0 else ("missing" if "undefined filter" in ea else "other-error")
+        rows.append(dict(name=nm, jq_rc=rj[0], jaq=st, jaq_err=ea[:120].replace("\n", " ")))
+    manual = []
+    if a.manual and os.path.exists(a.manual):
+        for l in open(a.manual, encoding="utf-8"):
+            m = re.match(r"^\s*-?\s*title:\s*(.*)$", l)
+            if m:
+                manual.append(m.group(1).strip())
+    mnames = set()
+    for t in manual:
+        for m in re.finditer(r"`(\$?\w+)(?:\(([^)]*)\))?", t):
+            mnames.add((m.group(1), (m.group(2).count(";") + 1) if m.group(2) else 0))
+    have = set(names)
+    manual_only = sorted("%s/%d" % x for x in mnames if "%s/%d" % x not in have)
+    syntax = []
+    for label, prog, inp in SYNTAX:
+        rj, ra = probe_pair(a, ["-c", prog], inp.encode() + b"\n")
+        syntax.append(dict(label=label, prog=prog, cls=classify(rj, ra), jq=short(rj[1] or rj[2]), jaq=short(ra[1] or ra[2])))
+    spot = []
+    for label, prog, inp, extra in SPOT:
+        rj, ra = probe_pair(a, ["-c"] + extra + [prog], inp.encode() + b"\n")
+        spot.append(dict(label=label, prog=prog, cls=classify(rj, ra), jq=short(rj[1] or rj[2]), jaq=short(ra[1] or ra[2]),
+                         jq_rc=rj[0], jaq_rc=ra[0]))
+    json.dump(dict(builtins=rows, manual_only=manual_only, syntax=syntax, spot=spot),
+              open(os.path.join(a.out, "builtins.json"), "w"), indent=0)
+    print(len(rows), Counter(r["jaq"] for r in rows), "syntax", Counter(x["cls"] for x in syntax), "spot", Counter(x["cls"] for x in spot))
+
+
+def cmd_flags(a):
+    sys.path.insert(0, HERE)
+    from jqcompat_probes import FLAGS
+    os.makedirs(a.out, exist_ok=True)
+    res = []
+    for label, args, stdin in FLAGS:
+        rj, ra = probe_pair(a, args, stdin, files={"f.json": b'{"a":1}\n', "p.jq": b".+1"})
+        res.append(dict(label=label, args=args, cls=classify(rj, ra), jq_rc=rj[0], jaq_rc=ra[0],
+                        jq=short(rj[1] or rj[2], 80), jaq=short(ra[1] or ra[2], 80)))
+    json.dump(res, open(os.path.join(a.out, "flags.json"), "w"), indent=0)
+    print(Counter(r["cls"] for r in res))
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["cases", "builtins", "flags", "report"])
