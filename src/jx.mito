@@ -110,6 +110,7 @@ struct Scan {
     skn: i64[256];
     serr: i64[256];               // the tag of a value that could not be navigated below this node (0 none)
     serrg: i64[256];
+    serri: i64[256];              // the same for index children of a value that is not an array
 }
 
 struct Out {

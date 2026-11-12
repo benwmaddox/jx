@@ -9,6 +9,8 @@ A case passes when jx and jq write the same standard output (CRLF normalized), o
 (an operation on a value of the document that Stage 2 does not parse, for example comparing two objects). Everything else is a failure:
 a differing output, jx failing where jq succeeds, or jx succeeding where jq fails. An under-approximated demand (a value read as null
 that the document had) shows up as a differing output."""
+import sys, io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='backslashreplace')
 import argparse, os, random, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
 
@@ -84,8 +86,14 @@ def gen_scalar_expr(r, depth):
         return "(%s // %s)" % (gen_scalar_expr(r, depth - 1), gen_scalar_expr(r, depth - 1))
     if k < 0.85:
         return "(if %s then %s else %s end)" % (gen_scalar_expr(r, depth - 1), gen_scalar_expr(r, depth - 1), gen_scalar_expr(r, depth - 1))
+    if k < 0.88:
+        return "(try %s catch %s)" % (gen_scalar_expr(r, depth - 1), gen_scalar_expr(r, depth - 1))
+    if k < 0.90:
+        return "(%s as $v | %s)" % (gen_scalar_expr(r, depth - 1), r.choice(["$v", "[$v, .]", "($v | type)", "$v"]))
+    if k < 0.92:
+        return "(%s | .[%s:%s])" % (gen_scalar_expr(r, depth - 1), r.choice(["", "1", "-1", "0"]), r.choice(["", "2", "-2", "1"]))
     if k < 0.93:
-        return "(%s | %s)" % (gen_scalar_expr(r, depth - 1), r.choice(["length", "type", "not", "keys", "tostring", "tonumber", "-(.)", "add", 'has("a")', "has(0)", "first", ".a", ".[0]"]))
+        return "(%s | %s)" % (gen_scalar_expr(r, depth - 1), r.choice(["length", "type", "not", "keys", "tostring", "tonumber", "-(.)", "add", 'has("a")', "has(0)", "first", ".a", ".[0]", "toboolean", "arrays", "values"]))
     return "[%s]" % gen_expr(r, depth - 1)
 
 
@@ -110,8 +118,10 @@ def gen_expr(r, depth):
         return "%s | map(%s)" % (gen_path(r), gen_scalar_expr(r, depth - 1))
     if k < 0.90:
         return "[%s | %s] | %s" % (gen_path(r), gen_scalar_expr(r, depth - 1), r.choice(["add", "length", "length", "add"]))
-    if k < 0.94:
+    if k < 0.92:
         return "%s | map(%s) | add" % (gen_path(r), gen_scalar_expr(r, depth - 1))
+    if k < 0.94:
+        return r.choice(["limit(2; %s)", "first(%s)", "[range(3)] | map(. + 1)", "%s | try error catch .", "[%s] | .[1:]", "(%s) as $x | [$x, $x]", "isempty(%s)", "[.[]?]", "[%s | numbers]"]).replace("%s", gen_path(r))
     return "%s | length" % gen_path(r)
 
 

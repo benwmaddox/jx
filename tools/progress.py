@@ -154,6 +154,44 @@ def main():
             L.append("")
     else:
         L.append("No timing run recorded yet.\n")
+    # peak memory: the same layout as the speed tables, from the files that carry it
+    if any("peak" in r for d in timings for r in d["timing"]):
+        L.append("## 6. Peak memory (peak working set in MB, whole process, lower is better)\n")
+        L.append("Same runs as section 5 (`tools/timing.py`); cells are `jx / jq / jaq`. jq is the real `jq.exe` (the `jq` on PATH is a launcher that hides its memory). "
+                 "jx reads the whole input into memory, so the document size is its floor.\n")
+        for sz in sizes:
+            L.append("**%s**\n" % sz)
+            rows = []
+            for d in timings:
+                if not any("peak" in r for r in d["timing"]):
+                    continue
+                row = [d["label"], d["date"]]
+                for flt in filters:
+                    m = next((r.get("peak") for r in d["timing"] if r["size"] == sz and r["filter"] == flt), None)
+                    row.append(" / ".join(m.get(k, "-") for k in ("jx", "jq", "jaq")) if m else "-")
+                rows.append(row)
+            L += table(["stage", "date"] + ["`%s`" % f.replace("|", "\\|") for f in filters], rows)
+            L.append("")
+
+    # milestones of the newest stage: one compact table
+    if jx:
+        top = max(int((re.search(r"stage(\d+)", r["label"]) or [0, 0])[1]) for r in jx)
+        ms = [r for r in jx if re.fullmatch(r"stage%d-.+" % top, r["label"])]
+        if ms:
+            L.append("## 7. Milestones of Stage %d\n" % top)
+            L.append("One row per finished feature tag (label `stage%d-<tag>`): jq.test results, then time and peak memory (MB) of the `select` filter on the 16.3 MB document.\n" % top)
+            rows = []
+            for r in ms:
+                t = r["totals"]
+                tim = next((d for d in timings if d["label"] == r["label"]), None)
+                cell = "-"
+                if tim:
+                    x = next((q for q in tim["timing"] if q["filter"] == ".users[] | select(.age >= 85) | .n" and q["size"].startswith("16")), None)
+                    if x:
+                        cell = "%s ms / %s MB" % (x["ms"].get("jx", "-"), x.get("peak", {}).get("jx", "-"))
+                rows.append([r["label"], r["date"], r.get("commit") or "-", t["pass"], t["differ"], t["rejected"], t["error"], pct(t["pass"], t["runnable"]), cell])
+            L += table(["milestone", "date", "commit", "pass", "differ", "rejected", "error", "pass %", "`select` on 16.3 MB"], rows)
+            L.append("")
     open(a.md, "w", encoding="utf-8", newline="\n").write("\n".join(L).rstrip("\n") + "\n")
     print("wrote", a.md, len(L), "blocks")
 

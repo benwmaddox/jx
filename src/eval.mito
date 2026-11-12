@@ -146,12 +146,22 @@ fn nav_check(n: i64) -> i64 {
     var tag = 0;
     while jj.f.par[c] >= 0 {
         let p = jj.f.par[c];
-        if jj.sc.serr[p] != 0 && jj.sc.serrg[p] == gen_of(p) { bad = c; tag = jj.sc.serr[p]; }
+        if jj.sc.serrg[p] == gen_of(p) && jj.f.niter[p] != c {
+            // the kind of the edge from p to c
+            var e = jj.f.nfirst[p];
+            while e != 0 {
+                if jj.f.enode[e] == c { break; }
+                e = jj.f.enext[e];
+            }
+            if e != 0 {
+                if jj.f.ekind[e] == 0 && jj.sc.serr[p] != 0 { bad = c; tag = jj.sc.serr[p]; }
+                if jj.f.ekind[e] == 1 && jj.sc.serri[p] != 0 { bad = c; tag = jj.sc.serri[p]; }
+            }
+        }
         c = p;
     }
     if bad < 0 { return 0; }
     let tn = tag_name(tag);
-    // the edge kind: a key or an index
     var e = jj.f.nfirst[jj.f.par[bad]];
     while e != 0 {
         if jj.f.enode[e] == bad { break; }
@@ -1684,6 +1694,7 @@ fn raise_value(doc: text, filter: text, x: i64) -> i64 {
         let n = str_plain(doc, x, 0);
         var n2 = n;
         if n2 > 200 { n2 = 200; }
+        while n2 > 0 && n2 < n && (byte_at(jj.tmp, n2) & 192) == 128 { n2 -= 1; }
         jj.err = "jx: error: " + substr(jj.tmp, 0, n2);
         jj.ev.rawmsg = substr(jj.tmp, 0, n2);
     } else {
@@ -1693,6 +1704,7 @@ fn raise_value(doc: text, filter: text, x: i64) -> i64 {
             let n = str_plain(doc, t, 0);
             var n3 = n;
             if n3 > 200 { n3 = 200; }
+            while n3 > 0 && n3 < n && (byte_at(jj.tmp, n3) & 192) == 128 { n3 -= 1; }
             jj.err = "jx: error (not a string): " + substr(jj.tmp, 0, n3);
         }
     }
@@ -1837,7 +1849,6 @@ fn play(doc: text, filter: text, e: i64) -> i64 {
     if jj.f.s_term[s] == 1 { return 0; }
     let r = jj.f.s_reg[s];
     reg_touch(r);
-    if jj.ev.rerr[r] != 0 { raise_deferred(r); return 1; }
     var p = jj.ev.rh[r];
     let nxt = jj.f.nx[e];
     while p >= 0 {
@@ -1849,6 +1860,7 @@ fn play(doc: text, filter: text, e: i64) -> i64 {
         }
         p = nn;
     }
+    if jj.ev.rerr[r] != 0 { raise_deferred(r); return 1; }
     return 0;
 }
 

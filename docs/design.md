@@ -534,6 +534,8 @@ byte; where jq and jaq differ, jq wins and the difference is logged.
 | 5 | strings: interpolation, `@` formats, `tojson`/`fromjson`, `ltrimstr`; regex only if the owner wants it | jq.test string cases | none new |
 | 6 | `--stream`, `-S`, remaining flags; word-at-a-time or SIMD skipping if measurements justify it | corpus identical | skip speed after the change |
 
+**Stage 3 (added by the owner, 2026-11-12):** `--explain` (print the automaton and slot program for a filter), with tests/explain.txt regression pairs.
+
 For every stage: the scanner is a new program beside the current jx until it passes the stage 1 exit test; no feature lands without
 its `jq.test` cases enabled; the skip list is part of the commit.
 
