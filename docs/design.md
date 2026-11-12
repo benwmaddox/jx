@@ -575,3 +575,13 @@ its `jq.test` cases enabled; the skip list is part of the commit.
    fallback for `walk`, `paths`, `setpath`, dynamic keys (a second engine, more jq coverage)? Is regex in scope?
 5. **Where the filter compiler lives.** Written in Mitochondria (like jx today) or inside the Rust compiler, and is the scanner a new
    program that replaces jx after stage 1 (recommended) or an in-place rewrite of `examples/jx`?
+
+## Owner decisions (2026-11-12)
+
+All five open decisions were settled as recommended:
+
+1. **Copy-through exactness:** copying a container or an escaped string straight from the input may differ from jq on duplicate keys, non-canonical escapes and number forms; a `--strict` mode checks for it.
+2. **Early exit and duplicate keys:** stop at the end of the enclosing container (not at the first fill, not never).
+3. **Validation:** validate everything the scanner reads; the unread tail after an early exit is not validated.
+4. **Unsupported features:** `walk`, `paths`, `setpath`, dynamic keys and regex are rejected at filter-compile time with a clear error. No second engine. Regex is out of scope.
+5. **Where it lives:** the filter compiler is Mitochondria code (like examples/jx today), not part of the Rust compiler. The scanner replaces `examples/jx` after Stage 1 (examples/jx stays in benwmaddox/mitochondria until then).
