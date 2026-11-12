@@ -83,13 +83,16 @@ for flags, fname in (([ "-c"], "filters.txt"), ([], "filters_pretty.txt"), (["-r
         if K and K not in filt: continue
         for d in names: cases.append((d, flags, filt))
 pass_n = fail_n = xd_n = xd_match = 0
+by_reason = {}
 failures = []
 with ThreadPoolExecutor(max_workers=6) as ex:
     for case, ok, erc, grc in ex.map(check, cases):
         cid = "%s|%s|%s" % (case[0], " ".join(case[1]), case[2])
-        if xdiff_reason(cid) or (not ok and grc == 0 and early_exit_tail(case[0], case[2])):
+        why = xdiff_reason(cid) or ("early exit: unread tail not validated" if (not ok and grc == 0 and early_exit_tail(case[0], case[2])) else None)
+        if why:
             xd_n += 1
             if ok: xd_match += 1
+            else: by_reason[why[:70]] = by_reason.get(why[:70], 0) + 1
         elif ok: pass_n += 1
         else:
             fail_n += 1
@@ -104,6 +107,7 @@ for filt in lines("reject.txt"):
 nrej = len(lines("reject.txt"))
 print("cases: %d against jq: %d pass, %d fail, %d expected differences (%d of them matched anyway); compile-time rejections: %d of %d ok"
       % (len(cases), pass_n, fail_n, xd_n, xd_match, rej_ok, nrej))
+for r, n in sorted(by_reason.items(), key=lambda kv: -kv[1]): print("  expected difference observed: %5d  %s" % (n, r))
 open(T + "/failures.txt", "w").write(chr(10).join(failures))
 for f in failures[:int(os.environ.get("JX_SHOW", "40"))]: print("FAIL", f)
 sys.exit(0 if not failures else 1)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Times jx against jq, jaq and the old prototype on generated documents (Windows, whole process: start, read, filter, write).
 usage: python -I bench/bench.py [--rows 5,20000] [--runs 15] [--big-runs 5]
-Environment: JX (new executable), OLDJX (the prototype built from Mitochondria's examples/jx), DATA (scratch directory for the documents).
+Environment: JX (new executable), JXI (optional: the same program built with an inlining flag), OLDJX (the prototype built from Mitochondria's examples/jx), DATA (scratch directory for the documents).
 Documents: {"users":[{"n":"user%d","age":N,"tags":["a","b"],"addr":{"city":"c%d","zip":N}}, ...]}
 Prints a markdown table of median milliseconds; before timing it checks that every tool prints the same bytes as jq."""
 import argparse, os, statistics, subprocess, sys, time
@@ -17,7 +17,8 @@ OLD = os.environ.get("OLDJX", "D:/tmp/w/jx/b/oldjx.exe")
 DATA = os.environ.get("DATA", "D:/tmp/w/jx/data")
 os.makedirs(DATA, exist_ok=True)
 FILTERS = [".users[0].n", ".users | length", ".users[] | select(.age >= 85) | .n", ".users[] | .addr.city"]
-TOOLS = [("jx", [JX, "-c"]), ("old jx", [OLD, "-c"]), ("jq", ["jq", "-c"]), ("jaq", ["jaq", "-c"])]
+JXI = os.environ.get("JXI")       # the same source built with --cflag -mllvm --cflag -inline-threshold=10000
+TOOLS = [("jx", [JX, "-c"])] + ([("jx inline", [JXI, "-c"])] if JXI else []) + [("old jx", [OLD, "-c"]), ("jq", ["jq", "-c"]), ("jaq", ["jaq", "-c"])]
 
 def make(rows):
     path = "%s/users%d.json" % (DATA, rows)

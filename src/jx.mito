@@ -106,8 +106,9 @@ struct J {
 }
 state j: J;
 
+// the input size is the one literal in `doc: utf8<N>` below (1 GiB; reserved address space, committed as the input is read)
 @main
-fn main(filter: utf8<1..1000> from arg(0), doc: utf8<2000000> from stdin, c: bool = false, r: bool = false) -> Response<text> {
+fn main(filter: utf8<1..1000> from arg(0), doc: utf8<1073741824> from stdin, c: bool = false, r: bool = false) -> Response<text> {
     j.o.pretty = !c;
     j.o.raw = r;
     if compile(filter) != 0 { return status(400, j.err); }
