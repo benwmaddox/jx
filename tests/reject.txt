@@ -1,37 +1,55 @@
-# Stage 1 rejects these when it compiles the filter: exit code 1, "not supported" on stderr, no output
+# Stage 2 rejects these when it compiles the filter: exit code 1, "not supported" on stderr, no output
 ..
 .[-1]
 .[1:2]
 .[]?
 .a?
-.a, .b
-.a + 1
-keys
-type
-map(.a)
-add
-first
-.users | map(.age) | add
-.a // 1
-if .a then 1 else 2 end
-{a: .a}
-[.users[] | .n]
+try .a
 .a as $x | $x
-.users[] | select(.age >= 85 and .age < 90)
-.users[] | select(.age | . > 3)
-.users[] | select(.age == .n)
-.users[] | select(.age > 3) | .tags[]
-select(.ok) | .users[]
-.a | length | length
-.a | length | .b
+$x
 .[$k]
+.[.k]
 .users[] | .n | ascii_downcase
-"literal"
-1
 @base64
-.a | tostring
-.users[] | not
-select(.a | not)
+@csv
+"a \(.b)"
 reduce .users[] as $u (0; . + 1)
+foreach .a[] as $x (0; .)
 limit(2; .users[])
+first(.users[])
+last
 .users | sort
+.users | sort_by(.n)
+.users | unique
+.users | group_by(.a)
+to_entries
+with_entries(.)
+walk(.)
+paths
+getpath(["a"])
+tojson
+fromjson
+min
+max
+.a = 1
+.a |= 1
+.a += 1
+.a + (.b, .c)
+{a: (.b, .c)}
+if (.a, .b) then 1 else 2 end
+.a // empty // .b | foo
+def f: 1; f
+label $out | .a
+input
+$ENV
+env
+test("a")
+ltrimstr("a")
+split(",")
+join(",")
+ascii_downcase
+any
+all
+range(3)
+.. | .a
+not_a_function

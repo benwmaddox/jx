@@ -2,7 +2,7 @@
 platform cli;
 struct Dummy { x: i64; }
 struct J { num: Num; d: Dummy; }
-state j: J;
+state jj: J;
 
 @main
 fn main(doc: utf8<1073741824> from stdin) -> Response<text> {
@@ -17,7 +17,7 @@ fn main(doc: utf8<1073741824> from stdin) -> Response<text> {
         if q > p {
             let x = num_parse(doc, p, q);
             fmt_dbl(x);
-            out += j.num.buf;
+            out += jj.num.buf;
             out += "\n";
         }
         p = e + 1;

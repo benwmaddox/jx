@@ -106,7 +106,7 @@ struct Scan {
 }
 
 struct Out {
-    text: utf8<4294967295>;       // everything written (4 GiB - 1, the most an answer can hold)
+    text: utf8<3221225472>;       // everything written (3 GiB: a field of 4 GiB - 1 misbehaves, see README)
     sep: bool;                    // a result was written already: a newline comes first
     pretty: bool;
     raw: bool;

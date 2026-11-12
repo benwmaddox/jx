@@ -1,0 +1,7 @@
+# filters that are not jq syntax: jq exits 3, jx exits 1 with a syntax error on stderr and no output
+.a |
+{a:
+[1,2
+if .a then 1
+1 < 2 < 3
+.a b

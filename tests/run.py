@@ -82,7 +82,7 @@ K = os.environ.get("JX_K")          # run only the filters containing this text
 DK = os.environ.get("JX_DOCS")      # run only the documents whose name contains this text
 cases = []
 names = sorted(d for d in docs if not DK or DK in d)
-for flags, fname in (([ "-c"], "filters.txt"), ([], "filters_pretty.txt"), (["-r"], "filters_raw.txt"), (["-c", "-r"], "filters_raw.txt")):
+for flags, fname in (([ "-c"], "filters.txt"), (["-c"], "filters2.txt"), ([], "filters_pretty.txt"), (["-r"], "filters_raw.txt"), (["-c", "-r"], "filters_raw.txt")):
     for fi, filt in enumerate(lines(fname)):
         if K and K not in filt: continue
         for d in names:
@@ -114,8 +114,40 @@ for filt in lines("reject.txt"):
     if p.returncode == 1 and not p.stdout and b"not supported" in p.stderr: rej_ok += 1
     else: failures.append("reject: %s (rc=%d, stderr=%r)" % (filt, p.returncode, p.stderr[:80]))
 nrej = len(lines("reject.txt"))
-print("cases: %d against jq: %d pass, %d fail, %d expected differences (%d of them matched anyway); compile-time rejections: %d of %d ok"
-      % (len(cases), pass_n, fail_n, xd_n, xd_match, rej_ok, nrej))
+# not jq syntax: jq fails, jx fails with a syntax error and no output
+syn_ok = 0
+for filt in lines("syntax.txt"):
+    with open(T + "/docs/simple.json", "rb") as f:
+        q = subprocess.run(["jq", "-c", filt], stdin=f, capture_output=True)
+    with open(T + "/docs/simple.json", "rb") as f:
+        p = subprocess.run([JX, "-c", filt], stdin=f, capture_output=True)
+    if q.returncode != 0 and p.returncode == 1 and not p.stdout and b"syntax error" in p.stderr: syn_ok += 1
+    else: failures.append("syntax: %s (jq rc=%d, jx rc=%d, stderr=%r)" % (filt, q.returncode, p.returncode, p.stderr[:80]))
+nsyn = len(lines("syntax.txt"))
+# options: unknown or unsupported options are refused by name (jq exits 2; a program can only exit with 1)
+opt_ok = 0
+opt_cases = [(["-Z", ".a"], b"unknown option '-Z'"), ([".a", "-Z"], b"unknown option '-Z'"), (["-S", ".a"], b"'-S' is not supported yet"),
+             ([".a", "-S"], b"'-S' is not supported yet"), (["-n", ".a"], b"'-n' is not supported yet"), (["-s", ".a"], b"'-s' is not supported yet"),
+             (["-e", ".a"], b"'-e' is not supported yet"), (["-C", ".a"], b"'-C' is not supported yet"), (["--tab", ".a"], b"'--tab' is not supported yet"),
+             ([".a", "--tab"], b"'--tab' is not supported yet"), (["--indent", "4", ".a"], b"'--indent' is not supported yet"),
+             ([".a", "--indent", "4"], b"'--indent' is not supported yet"), (["--arg", "x", "1", ".a"], b"'--arg' is not supported yet"),
+             (["--indent=4", ".a"], b"'--indent' is not supported yet"), (["--bogus", ".a"], b"no filter given"), (["-c"], b"no filter given"),
+             ([], b"no filter given"), (["-cr", ".a"], b"")]
+for args, want in opt_cases:
+    with open(T + "/docs/simple.json", "rb") as f:
+        p = subprocess.run([JX] + args, stdin=f, capture_output=True)
+    good = (p.returncode == 1 and not p.stdout and want in p.stderr) if want else (p.returncode == 1 and not p.stdout)
+    if good: opt_ok += 1
+    else: failures.append("option: %s (rc=%d, stdout=%r, stderr=%r)" % (" ".join(args), p.returncode, p.stdout[:30], p.stderr[:80]))
+# --validate: reads the whole input and fails when anything follows the first value (jq: parse error, exit 2; jx exits 1)
+val_ok = 0
+for doc, flags, want_rc in ((b'{"a":{"x":1}}', ["--validate"], 0), (b'{"a":{"x":1},"b":garbage}', ["--validate"], 1), (b'{"a":{"x":1},"b":[1,2', ["--validate"], 1),
+                            (b'{"a":{"x":1},"b":garbage}', [], 0)):
+    p = subprocess.run([JX, "-c"] + flags + [".a.x"], input=doc, capture_output=True)
+    if p.returncode == want_rc and (want_rc != 0 or True): val_ok += 1
+    else: failures.append("validate: %r %s (rc=%d)" % (doc, flags, p.returncode))
+print("cases: %d against jq: %d pass, %d fail, %d expected differences (%d of them matched anyway); compile-time rejections: %d of %d ok; "
+      "syntax errors: %d of %d; options: %d of %d; --validate: %d of 4" % (len(cases), pass_n, fail_n, xd_n, xd_match, rej_ok, nrej, syn_ok, nsyn, opt_ok, len(opt_cases), val_ok))
 for r, n in sorted(by_reason.items(), key=lambda kv: -kv[1]): print("  expected difference observed: %5d  %s" % (n, r))
 open(T + "/early_exit_cases.txt", "w").write(chr(10).join(early_cases))
 open(T + "/failures.txt", "w").write(chr(10).join(failures))

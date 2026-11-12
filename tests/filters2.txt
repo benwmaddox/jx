@@ -1,0 +1,288 @@
+# Stage 2 filters: expressions, construction, builtins, nested iteration. Each runs over every document with -c.
+.users[0].age + 1
+.users[0].age - 1
+.users[0].age * 2
+.users[0].age / 4
+.users[0].age % 7
+.users[1].age % 5
+.users[0].age + .users[1].age
+.users[0].n + "x"
+.users[0].n + .users[1].n
+.users[0].tags + .users[1].tags
+.users[0].tags + ["z"]
+.users[0].tags + null
+null + .users[0].age
+.users[0].zzz + 1
+.users[0].zzz + .users[0].yyy
+-.users[0].age
+-(.users[0].age + 1)
+.users[0].age - -1
+.users[].age + 1
+.users[].age * 2
+.users[].age / 3
+.users[] | .age + 0.5
+.users[] | .age * 1.1
+.users[] | -.age
+.users[] | .age % 10
+.users[] | (.age | floor)
+.users[] | (.age | sqrt)
+.users[] | (.age / 7 | floor)
+.users[] | (.age / 7 | ceil)
+.users[] | (.age / 7 | round)
+.users[] | (.age | tostring)
+.users[] | (.n | tostring)
+.users[] | (.addr | tostring)
+.users[] | (.age | tostring | tonumber)
+.users[] | (.n | tonumber)
+.users[0].age == 31
+.users[0].age != 31
+.users[0].age < 40
+.users[0].age <= 31
+.users[0].age > 40
+.users[0].age >= 31
+.users[0].n == "ann"
+.users[0].n < "b"
+.users[0].n > "A"
+.users[0].tags == ["a","b"]
+.users[0].tags == .users[1].tags
+.users[0].addr == null
+.users[0].zzz == null
+.users[0].age == 31.0
+.users[0].age == 3.1e1
+.users[].age > 20
+.users[] | .age >= 18 and .n != "ann"
+.users[] | .age >= 18 or .n == "ann"
+.users[] | (.age >= 18 and .age < 60)
+.users[] | .age | not
+.users[] | .n | not
+.users[] | .addr | not
+.users[] | (.age > 30) | not
+.users[] | select(.age >= 18 and .age < 60) | .n
+.users[] | select(.age < 18 or .age > 80) | .n
+.users[] | select((.age > 18) | not) | .n
+.users[] | select(.tags | length > 0) | .n
+.users[] | select(.addr != null) | .addr.city
+.users[] | select(.addr.city == "Austin")
+.users[] | select(.age == (.age | floor))
+.users[] | select(.n | length > 1)
+.users[] | select(.tags) | .n
+.users[] | select(.zzz) | .n
+.users[] | select(.age > 18) | select(.age < 60) | .n
+.users[] | select(.age > 18) | .tags[]
+.users[] | select(.age > 18) | .tags[] | length
+.users[] | .tags[] | length
+.users[0].age, .users[1].age
+.users[0].age, .users[1].n, .total
+.users[].n, .users[].age
+.users[] | .n, .age
+.users[] | .n, .age, .addr.city
+(.users[] | .n), (.users | length)
+.users | length, 5
+.zzz, .users[0].n
+.users[0].zzz // "none"
+.users[0].n // "none"
+.users[] | .addr.city // "?"
+.users[] | .tags[0] // "none"
+.users[] | (.age > 18) // "x"
+.users[0].zzz // .users[0].yyy // 3
+.zzz // empty
+.users[] | .zzz // empty
+.users[] | (.addr // {}) | .city
+if .users then "yes" else "no" end
+if .zzz then "yes" else "no" end
+if .users[0].age > 20 then "adult" elif .users[0].age > 10 then "teen" else "child" end
+.users[] | if .age >= 18 then "adult" else "minor" end
+.users[] | if .age > 80 then .n else null end
+.users[] | if .age > 80 then .n end
+.users[] | if .addr then .addr.city else "?" end
+.users[] | {n: .n}
+.users[] | {n: .n, age: .age}
+.users[] | {n, age}
+.users[] | {name: .n, city: .addr.city}
+.users[] | {n: .n, next: (.age + 1)}
+.users[] | {(.n): .age}
+.users[] | {"a b": .age}
+.users[] | {a: .age, a: .n}
+.users[] | {tags: .tags}
+.users[] | {tags: .tags, n: (.tags | length)}
+.users[] | {addr: .addr}
+.users[0] | {n, age, tags, addr}
+{a: 1}
+{a: 1, b: "x", c: null, d: true}
+{}
+{a: .users | length}
+{n: .users[0].n, m: .users[1].n}
+{u: [.users[] | .n]}
+{count: (.users | length), names: [.users[] | .n]}
+[.users[] | .n]
+[.users[] | .age]
+[.users[] | .age + 1]
+[.users[] | select(.age > 18) | .n]
+[.users[] | {n: .n}]
+[.users[] | .tags]
+[.users[] | .tags[]]
+[.users[].tags[]]
+[.users[] | .n, .age]
+[.users[0].n, .users[1].n]
+[.users[0].zzz]
+[]
+[1, 2, 3]
+[1, "a", null, true]
+[.users[] | .addr.city] | length
+[.users[] | .age] | add
+[.users[] | .n] | add
+[.users[] | .tags] | add
+[.users[] | .age] | length
+[.users[] | select(.age > 18)] | length
+[.users[] | select(.age > 18) | .age] | add
+[.users[] | .age | tostring] | add
+[] | add
+[] | length
+.users | map(.age)
+.users | map(.n)
+.users | map(.age + 1)
+.users | map(select(.age > 18))
+.users | map(select(.age > 18) | .n)
+.users | map({n: .n})
+.users | map(.tags)
+.users | map(.tags | length)
+.users | map(.age) | add
+.users | map(.age) | add / length
+.users | map(.n) | add
+.users | map(.age) | length
+.users | map(select(.age > 18)) | length
+.users | map(.tags[])
+.users | map([.n, .age])
+.users | map(.age) | .[0]
+.users | map(.n) | .[1]
+.users | add
+.users | length
+.users | first
+.users | first | .n
+.users[0] | keys
+.users[0] | keys | length
+.users[1].addr | keys
+.users | keys
+. | keys
+keys
+. | length
+.users[0] | has("n")
+.users[0] | has("zzz")
+.users[0] | has("addr")
+.users | has(0)
+.users | has(100)
+.users[0].tags | has(1)
+has("users")
+has("zzz")
+.users[] | has("tags")
+.users[] | has("addr")
+.users[] | .tags | has(0)
+type
+.users | type
+.users[0] | type
+.users[] | .age | type
+.users[] | .n | type
+.users[] | .tags | type
+.users[] | .addr | type
+.users[] | .zzz | type
+.users[] | type
+.users[] | (.age > 18) | type
+[.users[] | type]
+.users[0].age | type
+.users[0].tags | length
+.users[0] | length
+.users[0].n | length
+.users[0].age | length
+.users[0].zzz | length
+.users | length + 1
+(.users | length) * 2
+.users | length | tostring
+.users[] | (.n | length) + .age
+.users[] | length
+[.users[] | length]
+.users[] | .tags | length
+.users[] | .addr | length
+empty
+.users[] | empty
+.users[] | select(false)
+.users[] | select(true) | .n
+.users[0] | select(.age > 100)
+1
+"s"
+null
+true
+1, 2
+1 + 2 * 3
+(1 + 2) * 3
+10 / 4
+10 % 3
+-7 % 3
+7 % -3
+1 - 2 - 3
+2 * 3 % 4
+1 < 2
+1 == 1.0
+"a" < "b"
+"a" + "b"
+null + null
+null + 1
+1 + null
+[1] + [2]
+{a:1} + {b:2}
+{a:1} + {a:2}
+[1,2] - [2]
+1 and 2
+null or false
+null | not
+1 | not
+(1, 2) + 10
+(1, null, 3) // 7
+if 1 then 2 end
+if null then 2 end
+if 0 then "t" else "f" end
+if "" then "t" else "f" end
+if [] then "t" else "f" end
+100000000000000000000
+100000000000000000000 + 1
+100000000000000000000 == 100000000000000000001
+100000000000000000000 < 100000000000000000001
+1.000
+1.000 + 0
+-1.000
+-(1.000)
+1e3
+1e3 + 0
+1e1000
+-1e1000
+1e-5
+0.1 + 0.2
+3.0
+3.0 * 1
+1 / 3
+2 / 3
+10 / 3
+1e17 + 1
+123456789012345678
+123456789012345678 + 0
+5e-324
+5e-324 / 2
+1e308 * 10
+[1e308 * 10]
+[0 * -1]
+[-0]
+[-0 + 0]
+[0 / -1]
+.users[0].age | . + 1
+.users[0].age | . * .
+.users[0] | .age + .age
+.users[0] | [.n, .age]
+.users[0] | {n, a: .addr.city}
+.users | .[0] | .n
+
+.users | .[0].n
+.users | .[]
+.users | .[] | .n
+.users | map(.addr.city) | length
+.users[].tags | length
+.users[] | .tags | .[0]
+
