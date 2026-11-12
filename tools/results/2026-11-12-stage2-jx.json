@@ -2,7 +2,7 @@
  "label": "stage2",
  "tool": "jx",
  "date": "2026-11-12",
- "commit": "d261b2b",
+ "commit": "7765c44",
  "version": "",
  "test": "jq-1.8.2 tests/jq.test",
  "tool_versions": {
