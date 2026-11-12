@@ -11,10 +11,24 @@ dup|-c|.users[0].tags|STRICT
 dup|-c|.k|STRICT
 dup|-c|.note|STRICT
 dup|-c|.b|STRICT
-jqok_*|*|*|input jq accepts but jx rejects (non-JSON numbers NaN/Infinity/01/1./.5/+1, more than one top-level value) or input where early exit never reads the tail
 jqok_tail_truncated|*|*|early exit: the unread tail is not validated (decision 3)
+jqok_tail_garbage|*|*|early exit: the unread tail is not validated (decision 3)
 jqok_outer_dup|*|*|early exit stops at the end of the enclosing container, an outer repeated key is not seen (decision 2)
 jqok_invalid_utf8|*|*|invalid UTF-8 is copied through; jq writes U+FFFD
 *|*|*é*|a non-ASCII character typed in the filter is mangled on Windows by the C runtime's narrow argv (jq and jx alike); write it as an escape (\u00e9)
-dup|*|*|duplicate keys inside a copied container are copied as written (jq keeps one), and `length` of an object counts them (decision 1, README)
+dup|*|.[]*|`.[]` over an object with duplicate keys yields every value, jq only the last (README: differences)
+dup|*|. | length|`length` of an object with duplicate keys counts them, jq counts one (decision 1)
+dup|*|.users[0] | length|`length` of an object with duplicate keys counts them, jq counts one (decision 1)
+dup|*|.users[] | select(*) | length|`length` of an object with duplicate keys counts them, jq counts one (decision 1)
+dup|*|.users[] | length|`length` of an object with duplicate keys counts them, jq counts one (decision 1)
+dup|*|select(*)|duplicate keys inside a copied object are copied as written, jq keeps one (decision 1)
+dup|*|.users[] | select(*)|duplicate keys inside a copied object are copied as written, jq keeps one (decision 1)
+dup|*|. | .users | .[]|duplicate keys inside a copied object are copied as written, jq keeps one (decision 1)
+dup|*|.users.[0]|duplicate keys inside a copied object are copied as written, jq keeps one (decision 1)
+dup|*|.["users"]|duplicate keys inside a copied object are copied as written, jq keeps one (decision 1)
+dup|*|."users"*|duplicate keys inside a copied object are copied as written, jq keeps one (decision 1)
+dup|*|.users[0]|duplicate keys inside a copied object are copied as written, jq keeps one (decision 1)
+dup|*|.users[]|duplicate keys inside a copied object are copied as written, jq keeps one (decision 1)
+dup|*|.users|duplicate keys inside a copied object are copied as written, jq keeps one (decision 1)
+dup|*|.|duplicate keys inside a copied object are copied as written, jq keeps one (decision 1)
 deep9999|*|*|pretty output of 9999 nested containers is about 200 MB, over the 32 MB output area (declared size)

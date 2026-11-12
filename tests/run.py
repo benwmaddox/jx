@@ -49,10 +49,13 @@ for k, v in docs.items():
 def lines(name):
     return [l for l in open(os.path.join(HERE, name), encoding="utf-8").read().split("\n") if l and not l.startswith("#")]
 
-xdiff = [l.split("|", 3) for l in lines("xdiff.txt")]
+import re
+def glob(pat, text):      # only * is a wildcard (fnmatch would read [0] as a character class)
+    return re.fullmatch(".*".join(re.escape(p) for p in pat.split("*")), text, re.S) is not None
+xdiff = [l.rsplit("|", 1) for l in lines("xdiff.txt")]     # pattern|reason; the pattern is doc|flags|filter and the filter may hold |
 def xdiff_reason(cid):
-    for d, fl, fi, why in xdiff:
-        if fnmatch.fnmatchcase(cid, "%s|%s|%s" % (d, fl, fi)): return None if why == "STRICT" else why
+    for pat, why in xdiff:
+        if glob(pat, cid): return None if why == "STRICT" else why
     return None
 
 def norm(b): return b.replace(b"\r\n", b"\n")
@@ -70,7 +73,8 @@ def check(case):
     erc, eout, _ = run("jq", flags, filt, doc)
     eout = norm(eout)             # jq on Windows writes CRLF; jx writes LF
     grc, gout, gerr = run(JX, flags, filt, doc)
-    if erc != 0: ok = grc != 0 and len(gerr) > 0
+    if doc.startswith("rej_"): ok = grc != 0 and len(gerr) > 0 and len(gout) == 0   # jq accepts it, jx must refuse it (strict JSON, one document)
+    elif erc != 0: ok = grc != 0 and len(gerr) > 0
     else: ok = grc == 0 and gout == eout
     return case, ok, erc, grc
 
@@ -79,11 +83,14 @@ DK = os.environ.get("JX_DOCS")      # run only the documents whose name contains
 cases = []
 names = sorted(d for d in docs if not DK or DK in d)
 for flags, fname in (([ "-c"], "filters.txt"), ([], "filters_pretty.txt"), (["-r"], "filters_raw.txt"), (["-c", "-r"], "filters_raw.txt")):
-    for filt in lines(fname):
+    for fi, filt in enumerate(lines(fname)):
         if K and K not in filt: continue
-        for d in names: cases.append((d, flags, filt))
+        for d in names:
+            if d.startswith("rej_") and (flags != ["-c"] or fi % 7): continue    # a sample of filters is enough
+            cases.append((d, flags, filt))
 pass_n = fail_n = xd_n = xd_match = 0
 by_reason = {}
+early_cases = []
 failures = []
 with ThreadPoolExecutor(max_workers=6) as ex:
     for case, ok, erc, grc in ex.map(check, cases):
@@ -92,7 +99,9 @@ with ThreadPoolExecutor(max_workers=6) as ex:
         if why:
             xd_n += 1
             if ok: xd_match += 1
-            else: by_reason[why[:70]] = by_reason.get(why[:70], 0) + 1
+            else:
+                by_reason[why[:70]] = by_reason.get(why[:70], 0) + 1
+                if why.startswith("early exit"): early_cases.append(cid)
         elif ok: pass_n += 1
         else:
             fail_n += 1
@@ -108,6 +117,7 @@ nrej = len(lines("reject.txt"))
 print("cases: %d against jq: %d pass, %d fail, %d expected differences (%d of them matched anyway); compile-time rejections: %d of %d ok"
       % (len(cases), pass_n, fail_n, xd_n, xd_match, rej_ok, nrej))
 for r, n in sorted(by_reason.items(), key=lambda kv: -kv[1]): print("  expected difference observed: %5d  %s" % (n, r))
+open(T + "/early_exit_cases.txt", "w").write(chr(10).join(early_cases))
 open(T + "/failures.txt", "w").write(chr(10).join(failures))
 for f in failures[:int(os.environ.get("JX_SHOW", "40"))]: print("FAIL", f)
 sys.exit(0 if not failures else 1)

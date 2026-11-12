@@ -60,21 +60,21 @@ hello
 {"users":[{"n":"a","age":90},{"n":"b","age":1
 ### m_nested_unbalanced
 {"a":{"b":[1,2,{"c":3}]}
-### jqok_leading_zero
+### rej_leading_zero
 {"a":01,"users":[]}
-### jqok_trailing_dot
+### rej_trailing_dot
 {"a":1.,"users":[]}
-### jqok_leading_dot
+### rej_leading_dot
 {"a":.5,"users":[]}
-### jqok_plus
+### rej_plus
 {"a":+1,"users":[]}
-### jqok_nan
+### rej_nan
 {"a":NaN,"users":[]}
-### jqok_nan_lower
+### rej_nan_lower
 {"a":nan,"users":[]}
-### jqok_infinity
+### rej_infinity
 {"a":Infinity,"users":[]}
-### jqok_two_docs
+### rej_two_docs
 {"a":1} {"a":2}
-### jqok_two_scalars
+### rej_two_scalars
 1 2

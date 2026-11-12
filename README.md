@@ -61,7 +61,7 @@ The old `examples/jx` filters `keys` and `type` are in this list (Stage 2).
 
 Details that matter:
 
-- **Last key wins** (jq's rule for duplicate keys): a repeated key forgets what the earlier occurrence filled. A repeat on a path that is being streamed (`.users[]` with two `users` keys) is an error, not a silently different answer.
+- **Last key wins** (jq's rule for duplicate keys): a repeated key forgets what the earlier occurrence filled. A repeat of a named key on a path that is being streamed (`.users[]` with two `users` keys) is an error, not a silently different answer. (`.[]` over an object that repeats a key is not checked: it yields every value, see the differences.)
 - **Early exit** (design decisions 2 and 3): a filter with no `[]` stops after the container that held its last filled value ends (so `.users[0].n` reads up to the end of the first element), and the unread tail is not validated. A document with trailing data after its root value is an error (jx reads one document; jq would run the filter on each).
 - **Missing values** are null; a missing or null value that the filter iterates is jq's error, found when the enclosing container ends.
 - Empty or blank input prints nothing and exits 0, as jq does.
@@ -74,6 +74,7 @@ Details that matter:
 | Early exit with a damaged tail, or an outer repeated key after the exit point (decisions 2, 3) | answers | rejects the document / uses the last key |
 | `NaN`, `Infinity`, `01`, `1.`, `.5`, `+1`, more than one top-level value | rejected (strict JSON, one document) | accepted |
 | Invalid UTF-8 | copied through | replaced by U+FFFD |
+| `.[]` over an object with duplicate keys | every value | only the last one per key (needs buffering) |
 | Runtime error after some results | no stdout, exit 1 | earlier results on stdout, exit 5 |
 | Malformed input | exit 1 | exit 2 |
 | Pretty output more than 32 MB | error (`Out.text` is a declared size) | prints |
@@ -88,26 +89,34 @@ fail with a message on standard error. Documents: `tests/docs.txt` (nested and e
 `1e3`, `0.0001e5`, 21-digit integers, duplicate keys, empty arrays and objects, whitespace variations, comparisons across types), `tests/bad.txt`
 (40 malformed or jq-only inputs) and some generated in `run.py` (CRLF, no final newline, empty, blank, raw tab, invalid UTF-8, BOM, depth 9999 and 10001, a
 300-row table, early-exit tails). The 36 compile-time rejections are checked for the exit code, the message and an empty standard output.
-`JX_K=text` and `JX_DOCS=text` select filters and documents. Result of the last run: see Measurements.
+`JX_K=text` and `JX_DOCS=text` select filters and documents. A case with a `rej_` document (jq accepts it, jx must refuse it) passes when jx exits 1 with a message and no output.
+
+`examples/jx/e2e.sh` of the prototype (the Stage 1 exit test also names it) gives 26 of 34 on the new executable; the 8 that differ are intended: `type` x2 is rejected until Stage 2, four error messages are worded differently,
+an empty input now prints nothing and exits 0 as jq does, and a truncated input has a different message. The `jq.test` subset of the design's exit test was not run.
+
+Last run (against the `build.sh` binary): 13,345 cases, 12,217 pass (byte-identical to jq, or both fail, or for the `rej_` documents jx refuses), 0 fail, 1,128 listed as expected differences of which 223 really differ (94 outer repeated key / streamed repeat error, 47 invalid UTF-8,
+31 copied duplicate keys, 31 early exit with an unread damaged tail, 11 `.[]` over duplicate keys, 5 `length` of duplicate keys, 4 pretty output over the 32 MB cap) and 905 match anyway; 36 of 36 compile-time rejections.
 
 ## Byte-touch accounting
 
-A byte is touched when a loop reads it to decide something. Per filter, for a row `{"n":"user7","age":55,"tags":["a","b"],"addr":{"city":"c7","zip":21}}`:
+A byte is touched when a loop reads it to decide something. The code is not strictly one read per byte: the scanner looks at a
+byte, and the whitespace skipper, the digit loops and the mode dispatch each look again at the byte where they stop (a comma after a number is read
+by the number's loop, by the whitespace skip and by the mode test). **Measured**, by a scratch copy of `src/` in which every `byte_at` goes through a counter
+(the 1.59 MB, 20,000-row document, compact output; `byte_at` calls, not memory loads; the `substr ==` key comparisons and the output `memcpy`s are not counted):
 
-| Filter | Touches per input byte |
-| --- | --- |
-| every filter, every byte the scanner reaches | **1** in the scanner loop (the byte decides structure, validity and, if wanted, the span end). There is no second skipping pass and no separate validation pass |
-| `.users[0].n` | 1 for the bytes up to the end of `users[0]`; **0** after (early exit). The runtime still reads all of stdin into memory first, which costs about 0.75 ms per MB |
-| `.users \| length` | 1; the array's count is kept by the frame, so `length` costs 0 extra touches |
-| `.users[] \| select(.age >= 85) \| .n` | 1, plus the `age` digits read again at comparison time (2-3 bytes of about 80), plus matched key names read again by the key comparison (`n`, `age`, `users`), plus the copy of the output string for passing rows |
-| `.users[] \| .addr.city` | 1, plus the matched key names again, plus the output copy of each city |
-| a container result (`.users[0]`) | 1 for the scan, plus 1 more in the output formatter, which re-tokenizes the span to strip whitespace or indent and to normalize numbers and strings |
-| `length` of a string | 1 plus one pass over the string for the codepoint count |
+| Filter | `byte_at` calls per input byte | What is read |
+| --- | --- | --- |
+| `.users[0].n` | 167 calls in total (about 1.9 per byte of the first element); **0** for the rest of the document | early exit at the end of `users[0]` |
+| `.users \| length` | 1.55 | the scan alone; the count is kept by the frame, `length` costs nothing more |
+| `.users[] \| .addr.city` | 1.63 | the scan, plus the matched key names again (`substr ==`), plus the output copy of each city |
+| `.users[] \| select(.age >= 85) \| .n` | 1.83 | the scan, plus the `age` digits parsed again at comparison time, plus the copy of the names that pass |
+| `.users[0]` | 1.55 | the scan to the end of `users` (the container holding the last named key is the root object); the one element is re-tokenized by the formatter |
+| `.` (compact) | 3.01 | the scan (1.55) plus the formatter (1.46), which re-tokenizes the span to strip whitespace and to normalize numbers and strings |
 
-The design's table (1.3) says key bytes are touched once and Number kind digits are parsed inline; Stage 1 reads matched keys twice and
-compared numbers twice. Both are small (a few bytes per row), and both are the first things to fold into the scan loop in Stage 2.
-There is no instrumented build: the counts above come from the code (every byte passes through `scan_string`, `scan_number`,
-`scan_literal` or the whitespace skip exactly once).
+So the claim "every byte once" holds for the content of strings and numbers (one loop) but about half of the other bytes (structure: braces, commas,
+colons, quotes) are read two or three times: that is lookahead in the loop structure, not a second pass, and it is the first thing to remove
+(read each byte into a local once and dispatch on it) when the scan loop is rewritten for speed. The design's table (1.3) says key bytes are touched once and Number
+kind digits are parsed inline; Stage 1 reads matched keys twice and compared numbers twice (both a few bytes per row).
 
 ## Measurements
 
@@ -130,6 +139,10 @@ Mitochondria's main (which now reads up to 4 GiB). Milliseconds; jq 1.8.2, jaq 3
 | 200000 | 16.34 MB | `.users \| length` | 148 | 64 | 354 | 660 | 447 |
 | 200000 | 16.34 MB | `.users[] \| select(.age >= 85) \| .n` | 194 | 96 | 493 | 867 | 719 |
 | 200000 | 16.34 MB | `.users[] \| .addr.city` | 176 | 90 | 563 | 978 | 1001 |
+
+Notes: the document is 1.59 MB (the task's was 1.78 MB). "old jx" is built and run on today's runtime (main after the large-input merge): its floor is about 52 ms here, against 31 to 58 ms
+measured earlier at 1.78 MB on the previous runtime, so compare jx with jq and jaq, which did not change. The Windows numbers are a whole process each, medians; other
+processes were running on the machine.
 
 What the numbers say:
 
