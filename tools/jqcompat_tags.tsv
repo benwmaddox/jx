@@ -22,7 +22,7 @@ collectors	B	3	Stage 3	sort/group/unique/min/max/flatten: collector memory linea
 entries	B	3	Stage 3	to_entries/from_entries/with_entries: key/value span pairs, design stage 3	\b(to_entries|from_entries|with_entries)\b
 funcdef	B	3	Stage 3	non-recursive defs are inlined; closures inlined as fragments (about 3 days); design gives no stage	\bdef\s+\w+
 string-fns	B	5	Later	string functions on a captured string, results in scratch (about 2 days for the common ones)	\b(ltrimstr|rtrimstr|trimstr|trim|ltrim|rtrim|ascii_downcase|ascii_upcase|startswith|endswith|join|split|fromjson|tostring|tonumber|explode|implode|ascii|utf8bytelength|tojson|toarray)\b
-interpolation	B	5	Later	"a \(.x)" assembled in scratch; design stage 5 (about 1 day after tostring)	\\(|@\w+\s*""
+interpolation	B	5	Later	"a \(.x)" assembled in scratch; design stage 5 (about 1 day after tostring)	\\\(|@\w+\s*""
 math	B	3	Stage 3	pure float functions; bit-exact libm agreement unverified (about 1 day)	\b(floor|ceil|round|sqrt|pow|log|log2|log10|exp|exp2|exp10|fabs|abs|trunc|sin|cos|tan|asin|acos|atan|atan2|sinh|cosh|tanh|cbrt|significand|drem|ldexp|scalb|scalbln|nearbyint|logb|gamma|lgamma|tgamma|lgamma_r|frexp|modf|infinite|nan|isinfinite|isnan|isnormal|fma|fmin|fmax|fmod|hypot|copysign|rint|expm1|log1p)\b
 number-literals	B	2	Stage 2	literal and number-formatting rules (17 digits, 1E+3, big ints); part of Number kind, design 7.3/7.5	(?<![\w$.])\d[\d.]*[eE][+-]?\d|\d{15,}|\b(infinite|nan)\b
 limit-first	B	2	Stage 2	limit/first/last/nth/until/isempty/range/error/empty: generator loop and early exit	\b(limit|first|last|nth|until|isempty|range|skip|empty|add)\b
