@@ -107,7 +107,7 @@ SYNTAX = [
     ('chained .a."b"', '.a."b"', '{"a":{"b":1}}'),
     ("slice", ".[1:]", "[1,2]"),
     ("negative index", ".[-1]", "[1,2]"),
-    ("unary minus", "-(1,2)", "null"),
+    ("unary minus", "[-(1,2)]", "null"),
     ("comments", "1 # c", "null"),
     ("import", 'import "a" as a; 1', "null"),
     ("module directive", "module {a:1}; 1", "null"),

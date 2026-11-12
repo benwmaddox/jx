@@ -27,7 +27,7 @@ math	B	3	Stage 3	pure float functions; bit-exact libm agreement unverified (abou
 number-literals	B	2	Stage 2	literal and number-formatting rules (17 digits, 1E+3, big ints); part of Number kind, design 7.3/7.5	(?<![\w$.])\d[\d.]*[eE][+-]?\d|\d{15,}|\b(infinite|nan)\b
 limit-first	B	2	Stage 2	limit/first/last/nth/until/isempty/range/error/empty: generator loop and early exit	\b(limit|first|last|nth|until|isempty|range|skip|empty|add)\b
 try-catch	B	2	Stage 2	guarded region (about 2 days)	\b(try|catch|error)\b|\?
-keys-has	B	2	Stage 2	keys/type/length/map/select helpers on spans (types and counts)	\b(keys|keys_unsorted|has|type|map|map_values|values|nulls|booleans|numbers|strings|arrays|objects|iterables|scalars|length|not|select|tostring|tonumber)\b
+keys-has	B	2	Stage 2	keys/type/length/map/select helpers on spans (types and counts)	\b(keys|keys_unsorted|has|type|map|map_values|values|nulls|booleans|numbers|strings|arrays|objects|iterables|scalars|length|not|select)\b
 vars	B	2	Stage 2	`E as $v` aliases a slot/register	\bas\s+\$|\$[A-Za-z_]
 arith	B	2	Stage 2	arithmetic, comparison, and/or/not, `//` on Number/String kinds	(?<![|/])[-+*/%](?![=/])|\band\b|\bor\b|==|!=|<=|>=|<|>|//
 construct	B	2	Stage 2	object/array construction from extracted values, arena for built values	@construct
