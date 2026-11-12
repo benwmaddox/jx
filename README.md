@@ -31,12 +31,13 @@ before anything is read, `jx: option '-S' is not supported yet` for a jq option 
 while the filter runs (jq prints the results that came before the error first; jx writes nothing on standard output), 0 otherwise. Exit code 1 is jx's own: a filter that
 uses something Stage 2 does not support (`jx: not supported in Stage 2: ...`, found before any input is read) or a limit of jx (a full arena). The message goes to standard error.
 
-**Limits.** The input is up to 1 GiB (the literal in `doc: utf8<1073741824>` in `src/jx.mito`; the runtime reserves it and commits pages as they are read, so a small input
-costs nothing). The output buffer is 4 GiB - 1 (`Out.text`, the most a text field can hold; address space, committed as results are written). A 529 MB input, a 138 MB indented output
-and a 192 MB compact output were run. Strings with escapes are compared up to 1 MB (`J.tmp`); depth is 10000 like jq. Values built while evaluating live in an arena of 16 M entries at the
-document level and 1 M entries at each of three nesting depths of iterations; running out is a named error (exit 1). The arena arrays are what costs start-up time: a run
-of a tiny document takes 27 ms against Stage 1's 10 ms (jq 9 ms) because the runtime commits the arena's arrays at start, about 0.5 ms per million entries; a smaller arena
-(`Lim.REG0` and the array sizes of `Val` in `src/jx.mito`) trades collected-list capacity for that start-up time.
+**Limits.** The input is up to 4 GiB - 1 (the literal in `doc: utf8<4294967295>` in `src/jx.mito`; the runtime reserves it and commits pages as they are read, so a small input
+costs nothing). The output buffer is 1 GiB (`Out.text`): the runtime allows a text field of 4 GiB - 1 and jx was run with one (a 529 MB document printed indented, 1.14 GB, in 22 s with
+a 2.8 GB peak), but **every GiB declared costs about 10 ms of start-up on every run** (a tiny document: 27 ms with 1 GiB, 38 ms with 2 GiB, 58 ms with 4 GiB; Stage 1 took 10 ms),
+so the default is 1 GiB; an output over it ends with a runtime error naming the field. A 529 MB input, a 138 MB indented output and a 192 MB compact output were run. Strings with escapes are
+compared up to 1 MB (`J.tmp`); depth is 10000 like jq. Values built while evaluating live in an arena of 16 M entries at the document level and 1 M entries at each of three nesting
+depths of iterations; running out is a named error (exit 1). The arena arrays cost start-up time too (about 0.5 ms per million entries), so the floor of a tiny document is 27 ms against Stage 1's 10 ms
+(jq 9 ms); a smaller arena (`Lim.REG0` and the array sizes of `Val` in `src/jx.mito`) trades the capacity of collected lists for start-up time.
 
 ## What it supports
 

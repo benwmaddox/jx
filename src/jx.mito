@@ -114,7 +114,7 @@ struct Scan {
 }
 
 struct Out {
-    text: utf8<1073741824>;       // everything written (3 GiB: a field of 4 GiB - 1 misbehaves, see README)
+    text: utf8<1073741824>;       // everything written (1 GiB; each GiB declared costs about 10 ms of start-up, see README)
     sep: bool;                    // a result was written already: a newline comes first
     pretty: bool;
     raw: bool;
@@ -328,7 +328,7 @@ fn parse_opts(args: text) -> i64 {
 
 // the input size is the one literal in `doc: utf8<N>` below (1 GiB; reserved address space, committed as the input is read)
 @main
-fn main(args: utf8<0..1048576> from args, doc: utf8<1073741824> from stdin) -> Response<text> {
+fn main(args: utf8<0..1048576> from args, doc: utf8<4294967295> from stdin) -> Response<text> {
     jj.exitc = 1;
     var rc = parse_opts(args);
     if rc == 0 {
