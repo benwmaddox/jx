@@ -6,6 +6,9 @@ Usage (use `python -I` when the inputs are downloaded data):
   jqcompat.py builtins --out DIR [--jq PATH] [--jaq PATH] [--manual FILE]  # part 2: builtin coverage -> DIR/builtins.json
   jqcompat.py flags    --out DIR [--jq PATH] [--jaq PATH]                  # part 2: command-line flags -> DIR/flags.json
   jqcompat.py report   --out DIR --md docs/jq-feature-matrix.md            # render the matrix document from the JSON files
+  jqcompat.py record   --test jq.test --jx EXE --label stageN [--date D]  # progress record: one tools/results/*.json per run (jx)
+  jqcompat.py record   --test jq.test --tool jq|jaq [--label NAME]         # same for the reference tools (rerun for each new tool version)
+  then: python tools/progress.py                                           # regenerate docs/progress.md from tools/results/
 Everything generated goes under --out (default D:\\tmp\\w\\jqcompat), never into the repo.
 """
 import argparse, json, os, re, subprocess, sys, tempfile
@@ -562,9 +565,136 @@ def cmd_report(a):
     print("wrote", a.md, len(L), "lines")
 
 
+# ---------- progress records (tools/results/*.json, rendered by tools/progress.py) ----------
+RECORD_CLASSES = ["pass", "differ", "rejected", "error"]
+
+
+def strict_single_json(text):
+    """True when text is exactly one strict JSON document without duplicate keys (what jx accepts as input)."""
+    def hook(pairs):
+        keys = [k for k, _ in pairs]
+        if len(set(keys)) != len(keys):
+            raise ValueError("duplicate key")
+        return dict(pairs)
+    def bad(c):
+        raise ValueError(c)
+    try:
+        json.loads(text, object_pairs_hook=hook, parse_constant=bad)
+        return True
+    except Exception:
+        return False
+
+
+def run_jx_case(exe, c):
+    stdin = (c["input"] or "null").encode("utf-8") + b"\n"
+    return run(exe, [c["prog"], "-c"], stdin)
+
+
+def classify_record(c, tool, rc, out, err):
+    """(class, bytes_match, note) for one case. Classes: pass, differ, rejected (honest non-support), error."""
+    errt = err.decode("utf-8", "replace")
+    if tool == "jx":
+        if rc == -9:
+            return "error", False, "timeout"
+        if c["kind"] == "fail":
+            if rc == 0:
+                return "differ", False, "accepted a program that must not compile"
+            if "not supported" in errt:
+                return "rejected", False, "not supported"
+            return "pass", False, ""
+        if re.search(r"^\s*(import|include)", code_text(c["prog"]), re.M):
+            return "rejected", False, "needs -L modules"
+        if not out and rc == 2:
+            return "rejected", False, "option not supported"
+        if not out and rc == 1 and ("not supported" in errt or "syntax error" in errt):
+            return "rejected", False, "not supported" if "not supported" in errt else "syntax error (unsupported syntax)"
+        exp = [jload(x) for x in c["expected"]]
+        got = parse_out(out)
+        if rc == 0 and got is not None and [norm(x) for x in got] == [norm(x) for x in exp]:
+            want = ("\n".join(c["expected"]) + "\n").encode("utf-8") if c["expected"] else b""
+            return "pass", out == want, ""
+        if rc == 0:
+            return "differ", False, ""
+        return "error", False, "exit %d: %s" % (rc, errt.strip()[:80])
+    # jq / jaq: reuse the matrix classification
+    st, by = status(c, rc, out, err)
+    if st == "pass":
+        return "pass", by, ""
+    if st in ("differ", "differ-number-precision"):
+        return "differ", False, st
+    if st == "compile":
+        return "rejected", False, "does not compile"
+    return "error", False, st
+
+
+def tool_version(exe):
+    rc, out, err = run(exe, ["--version"])
+    return (out or err).decode("utf-8", "replace").strip().splitlines()[0] if (out or err) else "unknown"
+
+
+def git_head(path):
+    try:
+        return subprocess.run(["git", "-C", path, "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
+    except Exception:
+        return ""
+
+
+def cmd_record(a):
+    import datetime
+    tool = "jx" if a.jx else a.tool
+    if not tool:
+        sys.exit("record needs --jx EXE or --tool jq|jaq")
+    exe = a.jx or (a.jq if tool == "jq" else a.jaq)
+    label = a.label or (tool if not a.jx else sys.exit("--label required for jx (e.g. stage1)"))
+    tags = load_tags()
+    cases = parse_test(a.test)
+    totals = dict(ok={k: 0 for k in RECORD_CLASSES}, fail={k: 0 for k in RECORD_CLASSES}, bytes_identical=0, expected_diffs=0)
+    bytag = defaultdict(lambda: dict(total=0, **{k: 0 for k in RECORD_CLASSES}))
+    per_case, notes = [], []
+    with tempfile.TemporaryDirectory(dir=a.out) as td:
+        for k, c in enumerate(cases):
+            if tool == "jx":
+                rc, out, err = run_jx_case(exe, c)
+            else:
+                rc, out, err = run_case(exe, c, td)
+            cl, by, note = classify_record(c, tool, rc, out, err)
+            hit = tag_program(c["prog"], tags)
+            exp_diff = tool == "jx" and c["kind"] == "ok" and cl in ("differ", "error") and not strict_single_json(c["input"] or "null")
+            totals["fail" if c["kind"] == "fail" else "ok"][cl] += 1
+            totals["bytes_identical"] += bool(by and cl == "pass")
+            totals["expected_diffs"] += exp_diff
+            if c["kind"] == "ok":
+                for t in hit:
+                    bytag[t]["total"] += 1
+                    bytag[t][cl] += 1
+            per_case.append(cl[0] + ("*" if exp_diff else ""))
+            if exp_diff:
+                notes.append(dict(line=c["line"], note="documented difference: input is not one strict JSON document or has duplicate keys"))
+    repo = os.path.dirname(HERE)
+    rec = dict(label=label, tool=tool, date=a.date or datetime.date.today().isoformat(),
+               commit=git_head(a.jx_repo) if a.jx_repo else "",
+               version=tool_version(exe) if tool != "jx" else "", test="jq-1.8.2 tests/jq.test",
+               tool_versions=dict(jq=tool_version(a.jq), jaq=tool_version(a.jaq)),
+               totals=dict(cases=len(cases), runnable=sum(totals["ok"].values()),
+                           **{k: totals["ok"][k] for k in RECORD_CLASSES}, bytes_identical=totals["bytes_identical"],
+                           expected_diffs=totals["expected_diffs"], fail_cases={k: totals["fail"][k] for k in RECORD_CLASSES}),
+               tags={t: bytag[t] for t in sorted(bytag)}, cases="".join(per_case), documented_differences=notes)
+    resdir = a.results or os.path.join(repo, "tools", "results")
+    os.makedirs(resdir, exist_ok=True)
+    path = os.path.join(resdir, "%s-%s.json" % (rec["date"], label if label == tool else label + "-" + tool))
+    json.dump(rec, open(path, "w", encoding="utf-8", newline="\n"), indent=1)
+    print("wrote", path, rec["totals"])
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["cases", "builtins", "flags", "report"])
+    ap.add_argument("cmd", choices=["cases", "builtins", "flags", "report", "record"])
+    ap.add_argument("--jx", help="record: jx executable to run (program as first argument, input on stdin, -c)")
+    ap.add_argument("--tool", choices=["jq", "jaq"], help="record: run a reference tool instead of jx")
+    ap.add_argument("--label", help="record: stage name, e.g. stage1")
+    ap.add_argument("--date")
+    ap.add_argument("--results", help="record: output directory (default tools/results)")
+    ap.add_argument("--jx-repo", dest="jx_repo", help="record: git checkout the jx exe was built from (commit is recorded)")
     ap.add_argument("--test")
     ap.add_argument("--out", default=r"D:\tmp\w\jqcompat")
     ap.add_argument("--jq", default=JQ)
