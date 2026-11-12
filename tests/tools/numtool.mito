@@ -1,0 +1,27 @@
+// Test harness for src/num.mito: each input line is a decimal literal; prints jq's text for its double and the raw digits.
+platform cli;
+struct Dummy { x: i64; }
+struct J { num: Num; d: Dummy; }
+state j: J;
+
+@main
+fn main(doc: utf8<1073741824> from stdin) -> Response<text> {
+    var out: text<16000000> = "";
+    var p = 0;
+    let n = len(doc);
+    while p < n {
+        var e = p;
+        while e < n && byte_at(doc, e) != 10 { e += 1; }
+        var q = e;
+        if q > p && byte_at(doc, q - 1) == 13 { q -= 1; }
+        if q > p {
+            let x = num_parse(doc, p, q);
+            fmt_dbl(x);
+            out += j.num.buf;
+            out += "\n";
+        }
+        p = e + 1;
+    }
+    return ok(out);
+}
+use "../../src/num.mito";

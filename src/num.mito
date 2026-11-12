@@ -1,0 +1,433 @@
+// Numbers the way jq 1.8.2 has them: a decimal literal to a correctly rounded double, and a double to the text jq prints.
+// (Mitochondria has no float parser, and its own printing is Rust style, so both are done here.)
+//
+// parsing:  Clinger's exact fast path (15 digits or fewer, powers of ten up to 22), else exact big-integer arithmetic.
+// printing: `str(x)` gives the shortest digits that round-trip (the same digits as jq's dtoa); only the layout is redone:
+//           exponent form when decpt <= -4 or decpt > ndigits + 15, `e+NN` / `e-NN` with at least two digits, nan is null,
+//           infinity is the largest double. Checked against jq on 60,000 random doubles (tests/numcheck.py).
+
+struct Num {
+    ready: bool;
+    maxd: f64;
+    p10: f64[23];
+    dg: i64[1010];                // significant digits of the literal being parsed
+    bn: i64[800];                 // four big integers of 200 limbs (base 2^32, little endian)
+    bl: i64[4];                   // their lengths in limbs (0 is the number 0)
+    buf: utf8<400>;               // the text of the last formatted double
+    dd: i64[40];                  // digits and decimal point position of the last str(x) split
+    ddn: i64;
+    ddpt: i64;
+    ex: i64[80];
+}
+
+fn num_init() {
+    if j.num.ready { return; }
+    var x = 1.0;
+    var k = 0;
+    while k < 23 {
+        j.num.p10[k] = x;
+        x = x * 10.0;
+        k += 1;
+    }
+    j.num.maxd = 9007199254740991.0 * pow2(971);
+    j.num.ready = true;
+}
+
+// ---- big integers: number k lives in bn[k*200 ..], bl[k] limbs ----
+
+fn bn_set(k: i64, v: i64) {
+    j.num.bn[k * 200] = v & 4294967295;
+    j.num.bn[k * 200 + 1] = v >>> 32;
+    var n = 2;
+    while n > 0 && j.num.bn[k * 200 + n - 1] == 0 { n -= 1; }
+    j.num.bl[k] = n;
+}
+
+fn bn_mul_add(k: i64, m: i64, add: i64) {
+    var carry = add;
+    var i = 0;
+    let n = j.num.bl[k];
+    while i < n {
+        let v = j.num.bn[k * 200 + i] * m + carry;
+        j.num.bn[k * 200 + i] = v & 4294967295;
+        carry = v >>> 32;
+        i += 1;
+    }
+    if carry != 0 {
+        j.num.bn[k * 200 + n] = carry;
+        j.num.bl[k] = n + 1;
+    }
+}
+
+fn bn_shl(k: i64, bits: i64) {
+    let words = bits / 32;
+    let r = bits % 32;
+    let n = j.num.bl[k];
+    if n == 0 { return; }
+    var i = n - 1;
+    j.num.bn[k * 200 + n + words] = 0;
+    if r == 0 {
+        while i >= 0 { j.num.bn[k * 200 + i + words] = j.num.bn[k * 200 + i]; i -= 1; }
+    } else {
+        while i >= 0 {
+            let v = j.num.bn[k * 200 + i] << r;
+            j.num.bn[k * 200 + i + words + 1] = j.num.bn[k * 200 + i + words + 1] | (v >>> 32);
+            j.num.bn[k * 200 + i + words] = v & 4294967295;
+            i -= 1;
+        }
+    }
+    i = 0;
+    while i < words { j.num.bn[k * 200 + i] = 0; i += 1; }
+    var m = n + words + 1;
+    while m > 0 && j.num.bn[k * 200 + m - 1] == 0 { m -= 1; }
+    j.num.bl[k] = m;
+}
+
+fn bn_copy(dst: i64, src: i64) {
+    let n = j.num.bl[src];
+    var i = 0;
+    while i < n { j.num.bn[dst * 200 + i] = j.num.bn[src * 200 + i]; i += 1; }
+    j.num.bl[dst] = n;
+}
+
+fn bn_cmp(x: i64, y: i64) -> i64 {
+    let nx = j.num.bl[x];
+    let ny = j.num.bl[y];
+    if nx != ny { if nx < ny { return -1; } return 1; }
+    var i = nx - 1;
+    while i >= 0 {
+        let a = j.num.bn[x * 200 + i];
+        let b = j.num.bn[y * 200 + i];
+        if a != b { if a < b { return -1; } return 1; }
+        i -= 1;
+    }
+    return 0;
+}
+
+// x -= y (x >= y)
+fn bn_sub(x: i64, y: i64) {
+    var borrow = 0;
+    var i = 0;
+    let nx = j.num.bl[x];
+    let ny = j.num.bl[y];
+    while i < nx {
+        var v = j.num.bn[x * 200 + i] - borrow;
+        if i < ny { v -= j.num.bn[y * 200 + i]; }
+        if v < 0 { v += 4294967296; borrow = 1; } else { borrow = 0; }
+        j.num.bn[x * 200 + i] = v;
+        i += 1;
+    }
+    var m = nx;
+    while m > 0 && j.num.bn[x * 200 + m - 1] == 0 { m -= 1; }
+    j.num.bl[x] = m;
+}
+
+fn bn_bitlen(k: i64) -> i64 {
+    let n = j.num.bl[k];
+    if n == 0 { return 0; }
+    var top = j.num.bn[k * 200 + n - 1];
+    var b = 0;
+    while top != 0 { top = top >>> 1; b += 1; }
+    return (n - 1) * 32 + b;
+}
+
+// the top `want` bits of the number (which has at least that many), and whether any lower bit is set (in j.num.ddn)
+fn bn_top(k: i64, want: i64) -> i64 {
+    let bl = bn_bitlen(k);
+    let drop = bl - want;
+    var q = 0;
+    var i = bl - 1;
+    while i >= drop {
+        let bit = (j.num.bn[k * 200 + i / 32] >>> (i % 32)) & 1;
+        q = (q << 1) | bit;
+        i -= 1;
+    }
+    var sticky = 0;
+    while i >= 0 {
+        if ((j.num.bn[k * 200 + i / 32] >>> (i % 32)) & 1) != 0 { sticky = 1; break; }
+        i -= 1;
+    }
+    j.num.ddn = sticky;
+    return q;
+}
+
+fn pow2(e: i64) -> f64 {
+    var x = 1.0;
+    var n = e;
+    while n > 0 { x = x * 2.0; n -= 1; }
+    while n < 0 { x = x * 0.5; n += 1; }
+    return x;
+}
+
+// q * 2^e (+ a sticky bit), rounded to nearest even as a double; q has 55 to 62 bits
+fn round_dbl(q: i64, e: i64, sticky: i64) -> f64 {
+    var qb = 0;
+    var t = q;
+    while t != 0 { t = t >>> 1; qb += 1; }
+    let lead = qb - 1 + e;                    // exponent of the leading bit
+    if lead >= 1024 { return 1.0 / 0.0; }
+    var ue = lead - 52;                       // exponent of the last kept bit
+    if ue < -1074 { ue = -1074; }
+    let r = ue - e;
+    if r > 62 { return 0.0; }
+    var m = q >>> r;
+    let rem = q & ((1 << r) - 1);
+    let half = 1 << (r - 1);
+    if rem > half || (rem == half && (sticky != 0 || (m & 1) == 1)) { m += 1; }
+    if ue + 53 > 1024 && m >= 9007199254740992 { return 1.0 / 0.0; }
+    var x = 0.0 + (m as f64);
+    var n = ue;
+    // scale in steps that stay exact
+    while n > 0 { x = x * 2.0; n -= 1; }
+    while n < 0 { x = x * 0.5; n += 1; }
+    return x;
+}
+
+// the value of the decimal literal at [a, b) of t (JSON number grammar, an optional minus sign)
+fn num_parse(t: text, a: i64, b: i64) -> f64 {
+    num_init();
+    var i = a;
+    let neg = byte_at(t, i) == 45;
+    if neg { i += 1; }
+    var nd = 0;                    // digits kept in dg (no leading zeros)
+    var dropped = 0;
+    var sticky = 0;
+    var frac = 0;
+    var seen_dot = false;
+    var ex = 0;
+    while i < b {
+        let c = byte_at(t, i);
+        if c == 46 { seen_dot = true; i += 1; continue; }
+        if c == 101 || c == 69 {
+            i += 1;
+            var es = false;
+            if byte_at(t, i) == 45 { es = true; i += 1; }
+            else if byte_at(t, i) == 43 { i += 1; }
+            while i < b {
+                if ex < 100000000 { ex = ex * 10 + byte_at(t, i) - 48; }
+                i += 1;
+            }
+            if es { ex = -ex; }
+            break;
+        }
+        let d = c - 48;
+        if seen_dot { frac += 1; }
+        if nd == 0 && d == 0 { i += 1; continue; }
+        if nd < 1000 { j.num.dg[nd] = d; nd += 1; }
+        else { dropped += 1; if d != 0 { sticky = 1; } }
+        i += 1;
+    }
+    var q = ex - frac + dropped;
+    if sticky == 0 {
+        while nd > 0 && j.num.dg[nd - 1] == 0 { nd -= 1; q += 1; }
+    }
+    var x = 0.0;
+    if nd == 0 {
+        x = 0.0;
+    } else if nd + q > 310 {
+        x = 1.0 / 0.0;
+    } else if nd + q < -330 {
+        x = 0.0;
+    } else if nd <= 15 && q >= -22 && q <= 22 {
+        var w = 0;
+        var k = 0;
+        while k < nd { w = w * 10 + j.num.dg[k]; k += 1; }
+        x = w as f64;
+        if q > 0 { x = x * j.num.p10[q]; } else if q < 0 { x = x / j.num.p10[-q]; }
+    } else {
+        // exact: D * 10^q with D the digits as a big integer
+        var k = 0;
+        bn_set(0, 0);
+        while k < nd {
+            // nine digits at a time
+            var chunk = 0;
+            var m = 0;
+            while m < 9 && k < nd { chunk = chunk * 10 + j.num.dg[k]; m += 1; k += 1; }
+            var mul = 1;
+            var z = 0;
+            while z < m { mul = mul * 10; z += 1; }
+            bn_mul_add(0, mul, chunk);
+        }
+        if sticky != 0 { bn_mul_add(0, 10, 1); q -= 1; }
+        if q >= 0 {
+            var z = q;
+            while z > 0 {
+                var step = z;
+                if step > 9 { step = 9; }
+                var mul = 1;
+                var s = 0;
+                while s < step { mul = mul * 10; s += 1; }
+                bn_mul_add(0, mul, 0);
+                z -= step;
+            }
+            let nb = bn_bitlen(0);
+            if nb <= 62 {
+                x = round_dbl(bn_top(0, nb) << (62 - nb), nb - 62, 0);
+            } else {
+                let top = bn_top(0, 62);
+                x = round_dbl(top, nb - 62, j.num.ddn);
+            }
+        } else {
+            // D / 10^-q: scale D so the quotient has 56 to 58 bits
+            bn_set(1, 1);
+            var z = -q;
+            while z > 0 {
+                var step = z;
+                if step > 9 { step = 9; }
+                var mul = 1;
+                var s = 0;
+                while s < step { mul = mul * 10; s += 1; }
+                bn_mul_add(1, mul, 0);
+                z -= step;
+            }
+            var sh = 57 + bn_bitlen(1) - bn_bitlen(0);
+            if sh >= 0 { bn_shl(0, sh); } else { bn_shl(1, -sh); }
+            // long division, quotient bit by bit
+            var quo = 0;
+            var bit = 59;
+            while bit >= 0 {
+                bn_copy(2, 1);
+                bn_shl(2, bit);
+                if bn_cmp(0, 2) >= 0 {
+                    bn_sub(0, 2);
+                    quo = quo | (1 << bit);
+                }
+                bit -= 1;
+            }
+            var st = 0;
+            if j.num.bl[0] != 0 { st = 1; }
+            x = round_dbl(quo, -sh, st);
+        }
+    }
+    if neg { x = -x; }
+    return x;
+}
+
+// ---- printing ----
+
+// splits str(|x|) (x finite, not zero) into digits j.num.dd[0 .. ddn) and the decimal point position j.num.ddpt:
+// the value is 0.d1d2d3... * 10^ddpt
+fn dbl_digits(x: f64) {
+    let s = str(x);
+    let n = len(s);
+    var i = 0;
+    var nd = 0;
+    var cnt = 0;                    // digit characters seen, leading zeros too
+    var pt = -1;                    // digit characters before the point
+    var z = 0;                      // leading zeros
+    var ex = 0;
+    while i < n {
+        let c = byte_at(s, i);
+        if c == 46 { pt = cnt; i += 1; continue; }
+        if c == 101 || c == 69 {
+            i += 1;
+            var es = false;
+            if byte_at(s, i) == 45 { es = true; i += 1; }
+            else if byte_at(s, i) == 43 { i += 1; }
+            while i < n { ex = ex * 10 + byte_at(s, i) - 48; i += 1; }
+            if es { ex = -ex; }
+            break;
+        }
+        let d = c - 48;
+        cnt += 1;
+        if nd == 0 && d == 0 { z += 1; } else { j.num.dd[nd] = d; nd += 1; }
+        i += 1;
+    }
+    if pt < 0 { pt = cnt; }
+    while nd > 1 && j.num.dd[nd - 1] == 0 { nd -= 1; }
+    j.num.ddn = nd;
+    j.num.ddpt = pt - z + ex;
+}
+
+
+// bn_divmod10: the number k divided by 10 in place, its remainder returned
+fn bn_divmod10(k: i64) -> i64 {
+    var rem = 0;
+    var i = j.num.bl[k] - 1;
+    while i >= 0 {
+        let v = rem * 4294967296 + j.num.bn[k * 200 + i];
+        j.num.bn[k * 200 + i] = v / 10;
+        rem = v % 10;
+        i -= 1;
+    }
+    var m = j.num.bl[k];
+    while m > 0 && j.num.bn[k * 200 + m - 1] == 0 { m -= 1; }
+    j.num.bl[k] = m;
+    return rem;
+}
+
+// str() rounds an exact tie between two shortest digit strings up; dtoa (and so jq) takes the even one. Looks at the exact
+// decimal value of x when it has few fractional bits and fixes the last digit in j.num.dd.
+fn fix_tie(x: f64) {
+    let n = j.num.ddn;
+    if n < 15 { return; }
+    var y = x;
+    var f = 0;
+    while f <= 30 && y != floor(y) { y = y * 2.0; f += 1; }
+    if f == 0 || f > 30 || y >= 9007199254740992.0 { return; }
+    bn_set(3, y as i64);
+    var z = 0;
+    while z < f { bn_mul_add(3, 5, 0); z += 1; }
+    var len = 0;
+    while j.num.bl[3] > 0 && len < 78 { j.num.ex[len] = bn_divmod10(3); len += 1; }
+    // digits are in reverse order: ex[len-1] is the first
+    var lo = 0;
+    while lo < len && j.num.ex[lo] == 0 { lo += 1; }
+    let cnt = len - lo;                      // significant digits of the exact value
+    if cnt != n + 1 { return; }
+    if len - f != j.num.ddpt { return; }
+    if j.num.ex[lo] != 5 { return; }
+    var i = 0;
+    while i < n - 1 {
+        if j.num.ex[len - 1 - i] != j.num.dd[i] { return; }
+        i += 1;
+    }
+    let lower = j.num.ex[len - 1 - (n - 1)];
+    if j.num.dd[n - 1] != lower + 1 { return; }
+    if lower % 2 == 0 { j.num.dd[n - 1] = lower; }
+}
+
+// the text jq prints for the double x, in j.num.buf
+fn fmt_dbl(x0: f64) {
+    num_init();
+    var x = x0;
+    j.num.buf = "";
+    if x != x { j.num.buf += "null"; return; }
+    if x == 0.0 {
+        if 1.0 / x < 0.0 { j.num.buf += "-0"; } else { j.num.buf += "0"; }
+        return;
+    }
+    if x < 0.0 { j.num.buf += "-"; x = -x; }
+    if x > j.num.maxd { x = j.num.maxd; }
+    dbl_digits(x);
+    fix_tie(x);
+    let n = j.num.ddn;
+    let pt = j.num.ddpt;
+    var k = 0;
+    if pt <= -4 || pt > n + 15 {
+        j.num.buf += chr(48 + j.num.dd[0]);
+        if n > 1 {
+            j.num.buf += ".";
+            k = 1;
+            while k < n { j.num.buf += chr(48 + j.num.dd[k]); k += 1; }
+        }
+        var e = pt - 1;
+        j.num.buf += "e";
+        if e < 0 { j.num.buf += "-"; e = -e; } else { j.num.buf += "+"; }
+        if e < 10 { j.num.buf += "0"; }
+        j.num.buf += str(e);
+    } else if pt <= 0 {
+        j.num.buf += "0.";
+        k = pt;
+        while k < 0 { j.num.buf += "0"; k += 1; }
+        k = 0;
+        while k < n { j.num.buf += chr(48 + j.num.dd[k]); k += 1; }
+    } else if pt >= n {
+        while k < n { j.num.buf += chr(48 + j.num.dd[k]); k += 1; }
+        while k < pt { j.num.buf += "0"; k += 1; }
+    } else {
+        while k < pt { j.num.buf += chr(48 + j.num.dd[k]); k += 1; }
+        j.num.buf += ".";
+        while k < n { j.num.buf += chr(48 + j.num.dd[k]); k += 1; }
+    }
+}
