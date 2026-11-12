@@ -101,7 +101,7 @@ fn describe(tag: i64) -> text {
 // a value of type `tag` where the filter indexes into it: jq's error, except that null indexes to null
 fn index_error(node: i64, tag: i64, p: i64) -> i64 {
     if tag == 1 {
-        if j.f.niter[node] >= 0 { return fail_at("Cannot iterate over null", p); }
+        if j.f.niter[node] >= 0 || j.f.chk[node] != 0 { return fail_at("Cannot iterate over null", p); }
         return 0;
     }
     if j.f.niter[node] >= 0 {
@@ -157,8 +157,27 @@ fn value_done(doc: text, filter: text, node: i64, tag: i64, a: i64, b: i64, cnt:
     return 0;
 }
 
+// a container ends: a key or index the filter iterates below that never came is null, and null cannot be iterated
+fn missing_check(node: i64, sp: i64, p: i64) -> i64 {
+    var e = j.f.nfirst[node];
+    while e != 0 {
+        if j.f.ib[j.f.enode[e]] != 0 {
+            if j.f.ekind[e] == 0 {
+                if (j.sc.fseen[sp] & (1 << (e - 1))) == 0 { return fail_at("Cannot iterate over null", p); }
+            } else if j.f.ea[e] >= j.sc.fcnt[sp] {
+                return fail_at("Cannot iterate over null", p);
+            }
+        }
+        e = j.f.enext[e];
+    }
+    return 0;
+}
+
 fn close_frame(doc: text, filter: text, p: i64) -> i64 {
     let sp = j.sc.sp;
+    if j.sc.fnode[sp] >= 0 && j.f.chk[j.sc.fnode[sp]] != 0 {
+        if missing_check(j.sc.fnode[sp], sp, p) != 0 { return 1; }
+    }
     j.sc.sp = sp - 1;
     return value_done(doc, filter, j.sc.fnode[sp], j.sc.fkind[sp], j.sc.fstart[sp], p, j.sc.fcnt[sp], 0);
 }
@@ -261,7 +280,9 @@ fn scan(doc: text, filter: text) -> i64 {
             let kn = j.sc.fnode[sp];
             j.sc.fcnt[sp] += 1;
             node = -1;
-            if kn >= 0 && j.f.nkeys[kn] != 0 {
+            if kn >= 0 && j.f.niter[kn] >= 0 {
+                node = j.f.niter[kn];
+            } else if kn >= 0 && j.f.nkeys[kn] != 0 {
                 let ent = find_key(doc, kn, p + 1, e - p - 2, esc);
                 if ent != 0 {
                     node = j.f.enode[ent];
@@ -279,7 +300,7 @@ fn scan(doc: text, filter: text) -> i64 {
             mode = 0;
         } else {
             // a value ended
-            if j.sc.exit_depth > 0 && j.sc.sp < j.sc.exit_depth { break; }
+            if j.sc.exit_depth > 0 && j.sc.sp < j.sc.exit_depth && j.sc.sp > 0 { break; }
             let sp = j.sc.sp;
             p = skip_ws(doc, p);
             if sp == 0 {

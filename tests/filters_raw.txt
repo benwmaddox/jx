@@ -1,0 +1,12 @@
+# these also run with -r, and with -c -r
+.
+.s
+.n
+.t
+.ctl
+.nul
+.emoji
+.users[].n
+.users[] | select(.age >= 85) | .n
+.[]
+.users[0].tags[]

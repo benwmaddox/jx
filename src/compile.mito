@@ -326,6 +326,14 @@ fn compile(f: text) -> i64 {
         w += 1;
     }
     j.f.nwant = n;
+    // where a missing value would be iterated: children come after their parents, so go backwards
+    var m = j.f.nn - 1;
+    while m >= 0 {
+        if j.f.niter[m] >= 0 { j.f.ib[m] = 1; }
+        let pm = j.f.par[m];
+        if pm >= 0 && j.f.niter[pm] != m && j.f.ib[m] != 0 { j.f.ib[pm] = 1; j.f.chk[pm] = 1; }
+        m -= 1;
+    }
     // the unit: the deepest `[]` on the path to the result
     var u = cur;
     while u > 0 {

@@ -29,6 +29,8 @@ struct Filt {
     want: i64[64];                // 1 when a slot keeps the node's value
     unit: i64[64];                // 1 for the unit node
     stream: i64[64];              // 1 when the unit is at or below the node
+    ib: i64[64];                  // 1 when a `[]` is reachable from the node through keys and indexes only (a missing value there is an error)
+    chk: i64[64];                 // 1 when a key or index child has ib set
     nfirst: i64[64];              // first child entry of the node, 0 none
     niter: i64[64];               // the node reached by `[]`, -1 none
     nkeys: i64[64];               // children by key

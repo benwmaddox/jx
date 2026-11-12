@@ -1,0 +1,80 @@
+### m_trunc_obj
+{"users":[{"n":"a","age":90}],"a":
+### m_trunc_arr
+[1,2
+### m_colon
+{"a" 1}
+### m_comma
+[1 2]
+### m_trailing_comma_obj
+{"users":[],"a":1,}
+### m_trailing_comma_arr
+[1,]
+### m_leading_comma
+[,1]
+### m_unterminated_string
+{"a":"abc
+### m_bad_literal
+{"a":tru,"users":[]}
+### m_extra_close
+{"a":1}}
+### m_mismatch
+[}
+### m_mismatch2
+{"a":[1,2}
+### m_bad_escape
+{"a":"\x"}
+### m_lone_high_surrogate
+{"a":"\ud800"}
+### m_short_u
+{"a":"\u12"}
+### m_single_quotes
+{'a':1}
+### m_missing_comma_obj
+{"a":1 "b":2}
+### m_double_comma
+[1,,2]
+### m_key_not_string
+{1:2}
+### m_unquoted_key
+{a:1}
+### m_bare_word
+hello
+### m_number_dot
+{"a":1.5.3}
+### m_number_minus
+{"a":-}
+### m_literal_suffix
+{"a":truex}
+### m_garbage_after
+{"a":1} x
+### m_open_only
+[
+### m_close_only
+]
+### m_colon_only
+:
+### m_users_bad_row
+{"users":[{"n":"a","age":90},{"n":"b","age":}]}
+### m_users_trunc_row
+{"users":[{"n":"a","age":90},{"n":"b","age":1
+### m_nested_unbalanced
+{"a":{"b":[1,2,{"c":3}]}
+### jqok_leading_zero
+{"a":01,"users":[]}
+### jqok_trailing_dot
+{"a":1.,"users":[]}
+### jqok_leading_dot
+{"a":.5,"users":[]}
+### jqok_plus
+{"a":+1,"users":[]}
+### jqok_nan
+{"a":NaN,"users":[]}
+### jqok_nan_lower
+{"a":nan,"users":[]}
+### jqok_infinity
+{"a":Infinity,"users":[]}
+### jqok_two_docs
+{"a":1} {"a":2}
+### jqok_two_scalars
+1 2

@@ -1,0 +1,10 @@
+# these also run in the default (indented) mode
+.
+.users
+.users[]
+.users[0]
+.a
+.[]
+.users[] | select(.age >= 85)
+.users[].addr
+.users[0].tags

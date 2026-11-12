@@ -1,0 +1,175 @@
+# every line is a jq filter that jx supports; each runs over every document with -c
+.
+.users
+.users[]
+.users[0]
+.users[1]
+.users[3]
+.users[100]
+.users[0].n
+.users[1].n
+.users[0].tags
+.users[0].tags[1]
+.users[0].tags[]
+.users[0].addr.city
+.users[0].addr.zip
+.users[].n
+.users[].age
+.users[].tags
+.users[].tags[]
+.users[].tags[0]
+.users[].addr
+.users[].addr.city
+.users | length
+.users[] | length
+.users[].n | length
+.users[0] | length
+.users[0].tags | length
+. | length
+.a
+.a.b
+.a[0]
+.a | length
+.a.b.c
+.a.b.c.d
+.a.b.c.d[2].e
+.a.b.c.d[]
+.a[]
+.b
+.c
+.d
+.e
+.f
+.g.h
+.s
+.t
+.n
+.k
+.ok
+.note
+.total
+.nul
+.bs
+.ctl
+.u2028
+.lowsur
+.emoji
+.s | length
+.ctl | length
+.nul | length
+.n | length
+.emoji | length
+.a | .b
+.users | .[0] | .n
+.users|.[]|.age
+. | .users | .[]
+.[]
+.[0]
+.[1]
+.[1][1]
+.[1][1][0]
+.[2].a
+.[2].a[0]
+.[]|length
+."users"
+."users"[0]
+.["users"]
+.users.[0]
+.["users"][0]["n"]
+."key"
+."k\u0065y"
+.users[] | select(.age >= 85)
+.users[] | select(.age >= 85) | .n
+.users[] | select(.age > 30) | .n
+.users[] | select(.age < 20) | .n
+.users[] | select(.age <= 17) | .n
+.users[] | select(.age == 31) | .n
+.users[] | select(.age != 31) | .n
+.users[] | select(.age == 85) | .n
+.users[] | select(.age == 85.0) | .n
+.users[] | select(.age > 84.999999999999999999999) | .n
+.users[] | select(.age < 84.999999999999999999999) | .n
+.users[] | select(.age >= 8.5e1) | .n
+.users[] | select(.age == null) | .n
+.users[] | select(.age == true) | .n
+.users[] | select(.age == false) | .n
+.users[] | select(.age == "x") | .n
+.users[] | select(.age == "85")
+.users[] | select(.age > "x")
+.users[] | select(.age < "x")
+.users[] | select(.age > null)
+.users[] | select(.age >= true)
+.users[] | select(.age < -1)
+.users[] | select(.age > -1)
+.users[] | select(.age)
+.users[] | select(.age) | .n
+.users[] | select(.n == "bo")
+.users[] | select(.n == "\u00e9")
+.users[] | select(.n == "\u0041\u00e9")
+.users[] | select(.n == "a\"b")
+.users[] | select(.n == "")
+.users[] | select(.n < "b")
+.users[] | select(.n <= "b")
+.users[] | select(.n > "ab")
+.users[] | select(.n >= "ab")
+.users[] | select(.n != "bo")
+.users[] | select(.n)
+.users[] | select(.addr.city == "Boston") | .addr
+.users[] | select(.addr.city == "Boston") | .addr.zip
+.users[] | select(.addr == null) | .n
+.users[] | select(.addr.zip > 5000)
+.users[] | select(.tags[0] == "a") | .n
+.users[] | select(.tags[1] == "b") | .n
+.users[] | select(.n == "ann") | .tags
+.users[] | select(.age > 1) | select(.age < 90) | .n
+.users[] | select(.age > 1) | select(.age < 90)
+.users[] | .addr | select(.zip > 5000) | .city
+.users[] | .addr | .city
+.users[] | select(.age >= 85) | select(.n == "di") | .age
+.users[] | select(.age >= 85) | length
+. | select(.total == 4) | .ok
+select(.total == 4)
+select(.total == 4) | .users[0].n
+select(.ok)
+select(.note)
+select(.note == null)
+select(.f == 100000000000000000001)
+select(.f > 100000000000000000000)
+select(.f < 100000000000000000002)
+select(.c == 1000)
+select(.d == 1e3)
+select(.e == 0.1)
+select(.g == 0)
+select(.h > 1e999)
+select(.s == "a\"b\\c/d\u00e9A\ud83d\ude00")
+select(.s < "b")
+select(.s >= "a")
+select(.a == 1)
+select(.a == 2)
+select(.b == 1)
+select(.users[0].n == "a")
+.users[0] | select(.n == "ann") | .age
+.[] | select(. > 5)
+.[] | select(. == "x")
+.[] | select(. == null)
+.[] | select(.)
+.[] | select(.a == 1)
+.[] | select(.a)
+.[] | select(.a == null)
+.[] | select(.a > 1) | .a
+.[] | select(.a.b == 3)
+.[] | select(. == 1.0)
+.[] | length
+.[] | select(.[0] == 1)
+.[2] | select(.a[0] == 6)
+. | length
+.a | length
+.n | length
+.k | length
+.[] | .a
+.[] | .[0]
+.[] | .[]
+.a[] | .b
+.users[] | .tags[] | length
+.users[0].tags | .[1]
+.[] | select(. > 1) | length
