@@ -587,3 +587,27 @@ All five open decisions were settled as recommended:
 3. **Validation:** validate everything the scanner reads; the unread tail after an early exit is not validated.
 4. **Unsupported features:** `walk`, `paths`, `setpath`, dynamic keys and regex are rejected at filter-compile time with a clear error. No second engine. Regex is out of scope.
 5. **Where it lives:** the filter compiler is Mitochondria code (like examples/jx today), not part of the Rust compiler. The scanner replaces `examples/jx` after Stage 1 (examples/jx stays in benwmaddox/mitochondria until then).
+
+## Stage 2 as built (2026-11-12)
+
+What the implementation does where the plan above was open, so the next stage starts from the code and not from the sketch.
+
+- **The slot program is an expression tree evaluated by pushing.** `run(e, v)` runs node `e` on input `v` and hands every output to the node in `nx[e]`; the end of a chain is the *terminal* of the enclosing scope body
+  (print, append to a register, add fold, count fold, last, limit, `//`, `try`). Generators (`,`, `[]`, `range`, `limit`, `as`) are loops in `run`; there is no backtracking machine. `evs(e, v)` is the direct evaluator
+  for an expression with exactly one output (the operands of operators, object values, conditions). Classes: one output, at most one, any number; an operand that is not "one output" is rewritten to
+  `r as $t1 | l as $t2 | $t2 op $t1` (jq's cartesian order) before analysis.
+- **Scopes replace units.** A `[]` over a node of the path automaton whose path is known statically is a *scope*; the body of the scope (what follows the `[]` in the pipe) runs at the end of each element, with the
+  element's slots valid for that element only (a generation per unit node). Scopes nest (three deep). Where a scope cannot run its body while the document streams (the body uses a variable bound outside, or the
+  scope is not the first thing the filter prints) the scope collects the elements in a register and the body runs when the document has been read. Registers live in the arena region of the nesting depth that owns them.
+- **Values.** One entry per value in an arena of parallel arrays: spans of the input for strings, number literals and containers copied through; built arrays and objects as chains; numbers as an integer (a literal of at most
+  15 digits), a literal (a span, printed in decNumber's form) or a double. The arena has a region per nesting depth, rewound when an element of that depth ends.
+- **What a navigation that the filter did not ask for does.** A container that arrives as a span and is then indexed, compared, added, iterated or measured by something the path analysis could not see is *materialized*:
+  its bytes are read once more and built as a value (`materialize`). This is the design's "Fits+" case (a bounded second touch of a captured span); it is what lets small jq programs on small documents use the general
+  evaluator without a second engine.
+- **Errors.** A type error of a navigation the scanner meets (a number where `.a.b` needs an object) is recorded on the automaton node and raised when the value is read, so it is skipped by an untaken `if` branch and
+  caught by `try`. Errors raised in the body of a collecting scope are kept with the register and raised, with their value, when the register is played back, after the results that came before them. jq's `//` does not
+  catch errors on its left in 1.8.2 (checked), so neither does jx. A `limit`/`first`/`isempty`/`nth` stops the enumeration with a flag that unwinds to the node that asked for it.
+- **Numbers** (`src/num.mito`): a correctly rounded decimal-to-double after jq's 17-digit reduction, jq's printer; both checked against the real jq. Mitochondria has neither a float parser nor jq's layout, and its `str(x)`
+  rounds an exact tie between two shortest digit strings up where jq (David Gay's dtoa) takes the even one, which `fix_tie` corrects.
+- **Not built, by decision of the owner** (rejected when the filter is compiled): `reduce`, `foreach`, function definitions, destructuring, `label`, assignment, `path`/`paths`/`getpath`/`setpath`/`delpaths`/`del`/`walk`,
+  computed indexes, `..`, sort and group functions, math, string functions, `@formats`, interpolation, regular expressions, dates, modules, `$__loc__`, `input`.
