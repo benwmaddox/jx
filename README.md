@@ -157,3 +157,16 @@ What the numbers say:
   `byte_at` (and the per-iteration `text_len` call in loops) as a direct load; that is a code generator fix, not something jx can do from the language.
 - The remaining per-row cost is key lookup (a length and first-byte test, then a text comparison per candidate key), the generation bump and the
   program dispatch per unit, and the output copies; none of it is a second pass over the input.
+
+## Tracking progress
+
+`docs/progress.md` records, per implementation stage, how many of jq's own `tests/jq.test` cases jx passes (next to jq and jaq) and how fast it is. To add a stage:
+
+```
+./build.sh D:/tmp/w/jxprog-build/jxN.exe
+python -I tools/jqcompat.py record --test D:/tmp/w/jqcompat/jq.test --jx D:/tmp/w/jxprog-build/jxN.exe --label stageN --jx-repo .
+python -I tools/timing.py --jx D:/tmp/w/jxprog-build/jxN.exe --label stageN --jx-repo .
+python tools/progress.py
+```
+
+The results are the JSON files in `tools/results/`; `docs/progress.md` is generated from them (details in its header).

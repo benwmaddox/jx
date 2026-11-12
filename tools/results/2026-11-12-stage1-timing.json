@@ -1,0 +1,88 @@
+{
+ "label": "stage1",
+ "date": "2026-11-12",
+ "commit": "b28b3c7",
+ "unit": "median ms, whole process, Windows",
+ "timing": [
+  {
+   "rows": 20000,
+   "size": "1.59 MB",
+   "filter": ".users[0].n",
+   "ms": {
+    "jx": "10",
+    "jq": "91",
+    "jaq": "51"
+   }
+  },
+  {
+   "rows": 20000,
+   "size": "1.59 MB",
+   "filter": ".users | length",
+   "ms": {
+    "jx": "16",
+    "jq": "95",
+    "jaq": "55"
+   }
+  },
+  {
+   "rows": 20000,
+   "size": "1.59 MB",
+   "filter": ".users[] | select(.age >= 85) | .n",
+   "ms": {
+    "jx": "19",
+    "jq": "116",
+    "jaq": "81"
+   }
+  },
+  {
+   "rows": 20000,
+   "size": "1.59 MB",
+   "filter": ".users[] | .addr.city",
+   "ms": {
+    "jx": "19",
+    "jq": "122",
+    "jaq": "105"
+   }
+  },
+  {
+   "rows": 200000,
+   "size": "16.34 MB",
+   "filter": ".users[0].n",
+   "ms": {
+    "jx": "19",
+    "jq": "585",
+    "jaq": "399"
+   }
+  },
+  {
+   "rows": 200000,
+   "size": "16.34 MB",
+   "filter": ".users | length",
+   "ms": {
+    "jx": "67",
+    "jq": "579",
+    "jaq": "400"
+   }
+  },
+  {
+   "rows": 200000,
+   "size": "16.34 MB",
+   "filter": ".users[] | select(.age >= 85) | .n",
+   "ms": {
+    "jx": "97",
+    "jq": "775",
+    "jaq": "664"
+   }
+  },
+  {
+   "rows": 200000,
+   "size": "16.34 MB",
+   "filter": ".users[] | .addr.city",
+   "ms": {
+    "jx": "92",
+    "jq": "857",
+    "jaq": "871"
+   }
+  }
+ ]
+}

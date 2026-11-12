@@ -1,0 +1,36 @@
+# tag	class	stage	decision	reason	regex   (tab separated; regex runs on program text with string literals emptied and comments removed; "@construct" is a built-in rule)
+# class: A extraction only, B built values/arena (one pass), C whole subtree in memory, D outside the filter engine
+# stage: first stage of docs/design.md section 9 that schedules it (3 = assumed where the design lists it as Fits but gives no stage; 6 = rejected or out of scope)
+# decision: proposal only (Stage 2, Stage 3, Later, Open, Skip); the owner edits it in docs/jq-feature-matrix.md
+modules	D	6	Skip	import/include/modulemeta need a module loader and file search; rarely used in one-liners	\b(import|include|modulemeta|module|get_search_list)\b
+loc	D	6	Skip	$__loc__ needs source positions; design lists it as low value	\$__loc__
+input-inputs	D	4	Later	input/inputs/debug/stderr: next document is a new scan; cheap in the driver (about 1 day), design stage 4	\b(input|inputs|input_line_number|debug|stderr|input_filename)\b|\$__prog_args
+env	D	3	Stage 3	$ENV/env is a compile-time constant; under 1 hour	\$ENV|\benv\b
+dates	D	6	Open	pure functions but needs a calendar/strptime implementation (about 2-4 days); rarely needed for log filtering	\b(strptime|strftime|strflocaltime|mktime|gmtime|localtime|todate|fromdate|date|dateadd|datesub|now|todateiso8601|fromdateiso8601|dateiso8601)\b
+formats	D	5	Later	@csv/@tsv/@sh/@uri/@html/@base64 are output-side transforms on strings; cheap (about 1 day total)	@(csv|tsv|json|html|uri|urid|sh|base64|base64d|base32|base32d|text)\b
+regex	B	6	Skip	owner decision: regex skipped (needs an engine; Oniguruma semantics)	\b(test|match|capture|sub|gsub|scan|splits|ascii)\s*\(|\bsplit\s*\([^;)]*;|\b_match_impl\b
+walk	C	6	Skip	owner decision: needs a rebuilt tree of the node	\bwalk\b
+paths	C	6	Skip	owner decision: path/paths/getpath/setpath/delpaths/del/pick need positions and whole subtrees	\b(path|paths|getpath|setpath|delpaths|del|pick|leaf_paths)\b
+tostream	C	6	Skip	owner decision: tostream/fromstream/truncate_stream need a path stack and --stream style events	\b(tostream|fromstream|truncate_stream|limit_stream)\b
+recurse-dotdot	C	6	Open	`..`/recurse/while/repeat: All-children demand and recursion; cheapest is `..` on a captured node (about 3 days)	\.\.|\brecurse(_down)?\b|\b(while|repeat)\b
+assign	C	6	Open	`|=`, `=`, `+=` need paths of the update target; static paths could be done at compile time (about 3-5 days), computed ones need a tree	\|=|(?<![=!<>])[-+*/%]=|(?<![=!<>~])=(?![=~])
+dynamic-index	C	6	Open	.[$k], .[expr], has($k), in(): bounded re-scan of a captured node; static after inlining is free (about 2-3 days)	\.\[(?!\s*(-?\d+|""|-?\d*:-?\d*)?\s*\])|\b(has|in)\(\s*[^")]|\bin\(
+destructure	B	3	Stage 3	patterns bind constant index/key paths; `?//` alternatives need backtracking (about 2 days)	\bas\s*[\[{]|\?//
+label-break	B	3	Later	label/break is early exit from a generator (about 1 day on top of limit)	\b(label|break)\b
+reduce-foreach	B	3	Stage 3	accumulator registers, per design stage 3	\b(reduce|foreach)\b
+collectors	B	3	Stage 3	sort/group/unique/min/max/flatten: collector memory linear in count (about 3 days)	\b(sort|sort_by|group_by|unique|unique_by|min|max|min_by|max_by|reverse|flatten|any|all|transpose|combinations|bsearch|index|rindex|indices|inside|contains|IN|INDEX|GROUP_BY|UNIQUE_BY)\b
+entries	B	3	Stage 3	to_entries/from_entries/with_entries: key/value span pairs, design stage 3	\b(to_entries|from_entries|with_entries)\b
+funcdef	B	3	Stage 3	non-recursive defs are inlined; closures inlined as fragments (about 3 days); design gives no stage	\bdef\s+\w+
+string-fns	B	5	Later	string functions on a captured string, results in scratch (about 2 days for the common ones)	\b(ltrimstr|rtrimstr|trimstr|trim|ltrim|rtrim|ascii_downcase|ascii_upcase|startswith|endswith|join|split|fromjson|tostring|tonumber|explode|implode|ascii|utf8bytelength|tojson|toarray)\b
+interpolation	B	5	Later	"a \(.x)" assembled in scratch; design stage 5 (about 1 day after tostring)	\\\(|@\w+\s*""
+math	B	3	Stage 3	pure float functions; bit-exact libm agreement unverified (about 1 day)	\b(floor|ceil|round|sqrt|pow|log|log2|log10|exp|exp2|exp10|fabs|abs|trunc|sin|cos|tan|asin|acos|atan|atan2|sinh|cosh|tanh|cbrt|significand|drem|ldexp|scalb|scalbln|nearbyint|logb|gamma|lgamma|tgamma|lgamma_r|frexp|modf|infinite|nan|isinfinite|isnan|isnormal|fma|fmin|fmax|fmod|hypot|copysign|rint|expm1|log1p)\b
+number-literals	B	2	Stage 2	literal and number-formatting rules (17 digits, 1E+3, big ints); part of Number kind, design 7.3/7.5	(?<![\w$.])\d[\d.]*[eE][+-]?\d|\d{15,}|\b(infinite|nan)\b
+limit-first	B	2	Stage 2	limit/first/last/nth/until/isempty/range/error/empty: generator loop and early exit	\b(limit|first|last|nth|until|isempty|range|skip|empty|add)\b
+try-catch	B	2	Stage 2	guarded region (about 2 days)	\b(try|catch|error)\b|\?
+keys-has	B	2	Stage 2	keys/type/length/map/select helpers on spans (types and counts)	\b(keys|keys_unsorted|has|type|map|map_values|values|nulls|booleans|numbers|strings|arrays|objects|iterables|scalars|length|not|select)\b
+vars	B	2	Stage 2	`E as $v` aliases a slot/register	\bas\s+\$|\$[A-Za-z_]
+arith	B	2	Stage 2	arithmetic, comparison, and/or/not, `//` on Number/String kinds	(?<![|/])[-+*/%](?![=/])|\band\b|\bor\b|==|!=|<=|>=|<|>|//
+construct	B	2	Stage 2	object/array construction from extracted values, arena for built values	@construct
+comma-alt	B	2	Stage 2	`,` as union of slots, filter-order output	,
+conditional	B	2	Stage 2	if/elif/else per unit	\b(if|then|elif|else|end)\b
+core	A	1	Stage 2	identity/field/index/iterate/pipe/literals (stage 1 work)	^.*$

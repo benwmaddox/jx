@@ -1,0 +1,235 @@
+{
+ "label": "jq",
+ "tool": "jq",
+ "date": "2026-11-12",
+ "commit": "",
+ "version": "jq-1.8.2",
+ "test": "jq-1.8.2 tests/jq.test",
+ "tool_versions": {
+  "jq": "jq-1.8.2",
+  "jaq": "jaq 3.1.2"
+ },
+ "totals": {
+  "cases": 550,
+  "runnable": 531,
+  "pass": 531,
+  "differ": 0,
+  "rejected": 0,
+  "error": 0,
+  "bytes_identical": 444,
+  "expected_diffs": 0,
+  "fail_cases": {
+   "pass": 19,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  }
+ },
+ "tags": {
+  "arith": {
+   "total": 195,
+   "pass": 195,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "assign": {
+   "total": 42,
+   "pass": 42,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "collectors": {
+   "total": 80,
+   "pass": 80,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "comma-alt": {
+   "total": 185,
+   "pass": 185,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "conditional": {
+   "total": 38,
+   "pass": 38,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "construct": {
+   "total": 267,
+   "pass": 267,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "core": {
+   "total": 531,
+   "pass": 531,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "dates": {
+   "total": 14,
+   "pass": 14,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "destructure": {
+   "total": 30,
+   "pass": 30,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "dynamic-index": {
+   "total": 25,
+   "pass": 25,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "entries": {
+   "total": 3,
+   "pass": 3,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "formats": {
+   "total": 7,
+   "pass": 7,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "funcdef": {
+   "total": 17,
+   "pass": 17,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "input-inputs": {
+   "total": 2,
+   "pass": 2,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "interpolation": {
+   "total": 10,
+   "pass": 10,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "keys-has": {
+   "total": 58,
+   "pass": 58,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "label-break": {
+   "total": 6,
+   "pass": 6,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "limit-first": {
+   "total": 90,
+   "pass": 90,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "loc": {
+   "total": 2,
+   "pass": 2,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "math": {
+   "total": 28,
+   "pass": 28,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "modules": {
+   "total": 13,
+   "pass": 13,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "number-literals": {
+   "total": 20,
+   "pass": 20,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "paths": {
+   "total": 34,
+   "pass": 34,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "recurse-dotdot": {
+   "total": 3,
+   "pass": 3,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "reduce-foreach": {
+   "total": 32,
+   "pass": 32,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "string-fns": {
+   "total": 55,
+   "pass": 55,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "try-catch": {
+   "total": 127,
+   "pass": 127,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "vars": {
+   "total": 90,
+   "pass": 90,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  },
+  "walk": {
+   "total": 4,
+   "pass": 4,
+   "differ": 0,
+   "rejected": 0,
+   "error": 0
+  }
+ },
+ "cases": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+ "documented_differences": []
+}

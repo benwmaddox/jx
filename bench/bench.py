@@ -18,7 +18,7 @@ DATA = os.environ.get("DATA", "D:/tmp/w/jx/data")
 os.makedirs(DATA, exist_ok=True)
 FILTERS = [".users[0].n", ".users | length", ".users[] | select(.age >= 85) | .n", ".users[] | .addr.city"]
 JXI = os.environ.get("JXI")       # the same source built with --cflag -mllvm --cflag -inline-threshold=10000
-TOOLS = [("jx", [JX, "-c"])] + ([("jx inline", [JXI, "-c"])] if JXI else []) + [("old jx", [OLD, "-c"]), ("jq", ["jq", "-c"]), ("jaq", ["jaq", "-c"])]
+TOOLS = [("jx", [JX, "-c"])] + ([("jx inline", [JXI, "-c"])] if JXI else []) + ([("old jx", [OLD, "-c"])] if os.path.exists(OLD) else []) + [("jq", ["jq", "-c"]), ("jaq", ["jaq", "-c"])]
 
 def make(rows):
     path = "%s/users%d.json" % (DATA, rows)
