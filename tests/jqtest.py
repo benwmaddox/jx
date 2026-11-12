@@ -3,6 +3,8 @@
 reports them by class and by tag. The test file is data: fetch it to a scratch folder (D:/tmp/w/jqtest/jq.test, not in the repo) and never run it.
 usage: python -I tests/jqtest.py [--exe jx.exe] [--test jq.test] [--tag TAG] [--show N] [--line N] [--reasons]
   differ and error cases are listed (they must be zero except for documented differences); --reasons groups the rejected ones."""
+import sys, io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="backslashreplace")
 import argparse, importlib.util, os, sys
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -15,7 +17,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--exe", default="D:/tmp/w/jx/jx3.exe")
 ap.add_argument("--test", default="D:/tmp/w/jqcompat/jq.test")
 ap.add_argument("--tag"); ap.add_argument("--show", type=int, default=30); ap.add_argument("--line", type=int)
-ap.add_argument("--reasons", action="store_true"); ap.add_argument("--rejected", action="store_true")
+ap.add_argument("--inset", action="store_true"); ap.add_argument("--reasons", action="store_true"); ap.add_argument("--rejected", action="store_true")
 a = ap.parse_args()
 tags = jc.load_tags()
 cases = jc.parse_test(a.test)
@@ -36,6 +38,17 @@ for c, cl, note, out, err in res:
         if shown < a.show:
             shown += 1
             print("%s line %d: %s\n   input %s\n   expected %s\n   got %s %s" % (cl.upper(), c["line"], c["prog"].replace("\n", " ")[:150], (c["input"] or "")[:80], c["expected"][:3], out[:100], (err or b"")[:120]))
+if a.inset:
+    dec = {t["tag"]: t["decision"] for t in tags}
+    n_in = n_pass = 0
+    for c, cl, note, out, err in res:
+        if c["kind"] != "ok": continue
+        hit = jc.tag_program(c["prog"], tags)
+        if all(dec[t] == "Stage 2" for t in hit):
+            n_in += 1
+            if cl == "pass": n_pass += 1
+            else: print("IN-SET %s line %d: %s | input %s | %s %s" % (cl, c["line"], c["prog"].replace(chr(10), " ")[:110], (c["input"] or "")[:40], hit, err[:90]))
+    print("in the Stage 2 set: %d cases, %d pass" % (n_in, n_pass))
 if a.reasons:
     import re
     r = Counter()

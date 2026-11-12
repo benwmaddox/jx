@@ -12,12 +12,12 @@ const K {
     ALT: i64 = 9; BIN: i64 = 10; AND: i64 = 11; OR: i64 = 12; NEG: i64 = 13; IF: i64 = 14; ARR: i64 = 15; OBJ: i64 = 16;
     FN: i64 = 17; SELECT: i64 = 18; EMPTY: i64 = 19; CMPLIT: i64 = 20; FOLD: i64 = 21; PLAY: i64 = 22;
     TRY: i64 = 23; VAR: i64 = 24; AS: i64 = 25; VARBIND: i64 = 26; REDUCE: i64 = 27; RBIND: i64 = 28; RANGE: i64 = 29;
-    LIMIT: i64 = 30; UNTIL: i64 = 31; ERROR: i64 = 32;
+    LIMIT: i64 = 30; UNTIL: i64 = 31; ERROR: i64 = 32; SLICE: i64 = 33;
 }
 
 const F {
     LENGTH: i64 = 1; TYPE: i64 = 2; KEYS: i64 = 3; HAS: i64 = 4; NOT: i64 = 5; ADD: i64 = 6; TOSTRING: i64 = 7; TONUMBER: i64 = 8;
-    FLOOR: i64 = 9; CEIL: i64 = 10; ROUND: i64 = 11; SQRT: i64 = 12; FABS: i64 = 13; TOJSON: i64 = 14;
+    FLOOR: i64 = 9; CEIL: i64 = 10; ROUND: i64 = 11; SQRT: i64 = 12; FABS: i64 = 13; TOJSON: i64 = 14; TYPEMASK: i64 = 15; TOBOOL: i64 = 16;
 }
 
 fn reject(what: text, p: i64) -> i64 {
@@ -302,23 +302,36 @@ fn parse_postfix(f: text, t0: i64) -> i64 {
                 jj.cp = q + 1;
                 continue;
             }
-            if is_digit(d) {
-                var n = 0;
-                while is_digit(byte_at(f, q)) {
-                    if n > 100000000000 { reject("an index this large", q); return -1; }
-                    n = n * 10 + byte_at(f, q) - 48;
-                    q += 1;
+            // an index, a slice or an expression: parsed as expressions
+            var lo = -1;
+            if d != 58 {
+                jj.cp = q;
+                lo = parse_expr(f, 1);
+                if lo < 0 { return -1; }
+                q = skip_ws(f, jj.cp);
+            }
+            if byte_at(f, q) == 58 {
+                var hi = -1;
+                q = skip_ws(f, q + 1);
+                if byte_at(f, q) != 93 {
+                    jj.cp = q;
+                    hi = parse_expr(f, 1);
+                    if hi < 0 { return -1; }
+                    q = skip_ws(f, jj.cp);
                 }
-                q = skip_ws(f, q);
-                if byte_at(f, q) == 58 { reject("a slice", q); return -1; }
-                if byte_at(f, q) != 93 { syntax("expected ] after the index", q); return -1; }
-                t = mk(K.IDX, t, n, 0, q);
+                if byte_at(f, q) != 93 { syntax("expected ] after the slice", q); return -1; }
+                t = mk(K.SLICE, t, lo, hi, q);
                 jj.cp = q + 1;
                 continue;
             }
-            if d == 45 { reject("a negative index (it needs the array's length)", q); return -1; }
-            if d == 58 { reject("a slice", q); return -1; }
-            reject("an expression inside [...]", q);
+            if byte_at(f, q) != 93 { syntax("expected ] after the index", q); return -1; }
+            if jj.f.ak[lo] == K.LIT && jj.v.vt[jj.f.aa[lo]] == 4 && jj.v.vs[jj.f.aa[lo]] == 4 && jj.v.va[jj.f.aa[lo]] >= 0 {
+                t = mk(K.IDX, t, jj.v.va[jj.f.aa[lo]], 0, q);
+                jj.cp = q + 1;
+                continue;
+            }
+            if jj.f.ak[lo] == K.LIT && jj.v.vt[jj.f.aa[lo]] == 4 && jj.v.vs[jj.f.aa[lo]] == 4 { reject("a negative index (it needs the array's length)", q); return -1; }
+            reject("an index computed by an expression (dynamic indexing)", q);
             return -1;
         }
         if c == 63 {
@@ -334,13 +347,13 @@ fn parse_postfix(f: text, t0: i64) -> i64 {
 
 fn parse_object(f: text, p0: i64) -> i64 {
     // after the brace
-    let first = jj.f.nobj;
     var cnt = 0;
+    var head = -1;
+    var tail = -1;
     var q = skip_ws(f, jj.cp);
-    if byte_at(f, q) == 125 { jj.cp = q + 1; return mk(K.OBJ, first, 0, 0, p0); }
+    if byte_at(f, q) == 125 { jj.cp = q + 1; return mk(K.OBJ, jj.f.nobj, 0, 0, p0); }
     while true {
         q = skip_ws(f, q);
-        if jj.f.nobj >= 255 { jj.err = "jx: too many object entries in the filter"; return -1; }
         let c = byte_at(f, q);
         var key = -1;
         var shorthand = -1;
@@ -371,7 +384,26 @@ fn parse_object(f: text, p0: i64) -> i64 {
             if byte_at(f, q) != 41 { syntax("expected ) after the key", q); return -1; }
             q += 1;
         } else if c == 36 {
-            return rej1("`$name` in an object", q);
+            var e2 = q + 1;
+            while is_name_char(byte_at(f, e2)) { e2 += 1; }
+            if e2 == q + 1 { return syn1("a variable name is needed after `$`", q); }
+            let slot = find_var(f, q + 1, e2);
+            if slot < 0 { return syn1("$" + substr(f, q + 1, e2 - q - 1) + " is not defined", q); }
+            let vn = mk(K.VAR, 0, 0, slot, q);
+            if vn < 0 { return -1; }
+            let q3 = skip_ws(f, e2);
+            if byte_at(f, q3) == 58 {
+                // {$x: v} is {($x): v}
+                key = vn;
+                q = e2;
+            } else {
+                // {$x} is {x: $x}
+                let lo = len(jj.f.lits);
+                jj.f.lits += substr(f, q + 1, e2 - q - 1);
+                key = mk(K.LIT, new_const(5, 1, lo, e2 - q - 1), 0, 0, q);
+                shorthand = vn;
+                q = e2;
+            }
         } else if c == 64 {
             return rej1("a format string in an object", q);
         } else {
@@ -382,13 +414,13 @@ fn parse_object(f: text, p0: i64) -> i64 {
         if byte_at(f, q) == 58 {
             jj.cp = skip_ws(f, q + 1);
             // an object value is a term, with unary minus and pipes between terms (jq's ExpD)
-            var v = parse_unary(f);
+            var v = parse_expr(f, 3);
             if v < 0 { return -1; }
             while true {
                 let q2 = skip_ws(f, jj.cp);
                 if byte_at(f, q2) == 124 && byte_at(f, q2 + 1) != 61 {
                     jj.cp = q2 + 1;
-                    let r = parse_unary(f);
+                    let r = parse_expr(f, 3);
                     if r < 0 { return -1; }
                     v = mk_pipe(v, r, q2);
                     if v < 0 { return -1; }
@@ -400,15 +432,25 @@ fn parse_object(f: text, p0: i64) -> i64 {
             if shorthand < 0 { return syn1("expected : after the key", q); }
             val = shorthand;
         }
-        let o = jj.f.nobj;
-        jj.f.okey[o] = key;
-        jj.f.oval[o] = val;
-        jj.f.nobj = o + 1;
+        // the entry waits in a chain: a nested object takes its own block of entries first
+        let en = mk(K.ID, key, val, -1, q);
+        if en < 0 { return -1; }
+        if tail >= 0 { jj.f.ac[tail] = en; } else { head = en; }
+        tail = en;
         cnt += 1;
         let d = byte_at(f, q);
         if d == 44 { q += 1; continue; }
         if d == 125 { jj.cp = q + 1; break; }
         return syn1("expected , or } in the object", q);
+    }
+    if jj.f.nobj + cnt > 255 { jj.err = "jx: too many object entries in the filter"; return -1; }
+    let first = jj.f.nobj;
+    var en2 = head;
+    while en2 >= 0 {
+        jj.f.okey[jj.f.nobj] = jj.f.aa[en2];
+        jj.f.oval[jj.f.nobj] = jj.f.ab[en2];
+        jj.f.nobj += 1;
+        en2 = jj.f.ac[en2];
     }
     return mk(K.OBJ, first, cnt, 0, p0);
 }
@@ -540,6 +582,7 @@ fn parse_primary(f: text) -> i64 {
         while is_name_char(byte_at(f, e)) { e += 1; }
         let w = substr(f, q, e - q);
         jj.cp = e;
+        if w == "have_decnum" || w == "have_literal_numbers" { return mk(K.LIT, jj.ev.htrue, 0, 0, q); }
         if w == "true" { return mk(K.LIT, jj.ev.htrue, 0, 0, q); }
         if w == "false" { return mk(K.LIT, jj.ev.hfalse, 0, 0, q); }
         if w == "null" { return mk(K.LIT, jj.ev.hnull, 0, 0, q); }
@@ -549,21 +592,25 @@ fn parse_primary(f: text) -> i64 {
         if w == "type" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.TYPE, q); }
         if w == "keys" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.KEYS, q); }
         if w == "not" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.NOT, q); }
-        if w == "add" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.ADD, q); }
+        if w == "add" {
+            let q2 = skip_ws(f, jj.cp);
+            if byte_at(f, q2) == 40 {
+                let a = parse_arg(f, w);
+                if a < 0 { return -1; }
+                return mk(K.FOLD, a, -1, 1, q);
+            }
+            return mk(K.FN, -1, -1, F.ADD, q);
+        }
         if w == "tostring" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.TOSTRING, q); }
         if w == "tonumber" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.TONUMBER, q); }
         if w == "try" {
-            let b0 = parse_primary(f);
-            if b0 < 0 { return -1; }
-            let b = parse_postfix(f, b0);
+            let b = parse_unary(f);
             if b < 0 { return -1; }
             var h = -1;
             let q2 = skip_ws(f, jj.cp);
             if is_word(f, q2, "catch") {
                 jj.cp = q2 + 5;
-                let h0 = parse_primary(f);
-                if h0 < 0 { return -1; }
-                h = parse_postfix(f, h0);
+                h = parse_unary(f);
                 if h < 0 { return -1; }
             }
             return mk(K.TRY, b, h, 0, q);
@@ -651,6 +698,28 @@ fn parse_primary(f: text) -> i64 {
             if rn < 0 { return -1; }
             jj.f.ad[rn] = init;
             return rn;
+        }
+        if w == "arrays" || w == "objects" || w == "iterables" || w == "scalars" || w == "values" || w == "booleans" || w == "nulls" || w == "numbers" || w == "strings" {
+            if !no_args(f, w) { return -1; }
+            var mask = 0;
+            if w == "arrays" { mask = 64; }
+            if w == "objects" { mask = 128; }
+            if w == "iterables" { mask = 192; }
+            if w == "scalars" { mask = 62; }
+            if w == "values" { mask = 252; }
+            if w == "booleans" { mask = 12; }
+            if w == "nulls" { mask = 2; }
+            if w == "numbers" { mask = 16; }
+            if w == "strings" { mask = 32; }
+            let tm = mk(K.FN, -1, -1, F.TYPEMASK, q);
+            if tm < 0 { return -1; }
+            jj.f.ad[tm] = mask;
+            return mk(K.SELECT, tm, 0, 0, q);
+        }
+        if w == "toboolean" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.TOBOOL, q); }
+        if w == "skip" {
+            if !parse_args(f, w, 2, 2) { return -1; }
+            return mk(K.LIMIT, jj.pa[0], jj.pa[1], 6, q);
         }
         if w == "first" {
             let q2 = skip_ws(f, jj.cp);
@@ -820,7 +889,7 @@ fn cls(e: i64) -> i64 {
         if a == 1 || b == 1 { return 1; }
         return 0;
     }
-    if k == K.FIELD || k == K.IDX { return cls(jj.f.aa[e]); }
+    if k == K.FIELD || k == K.IDX || k == K.SLICE { return cls(jj.f.aa[e]); }
     if k == K.PIPE {
         let a = cls(jj.f.aa[e]);
         let b = cls(jj.f.ab[e]);
@@ -833,12 +902,22 @@ fn cls(e: i64) -> i64 {
         return cls(jj.f.ab[e]);
     }
     if k == K.IF {
+        if cls(jj.f.aa[e]) != 0 { return 2; }
         var m = cls(jj.f.ab[e]);
         let m2 = cls(jj.f.ac[e]);
         if m2 > m { m = m2; }
         return m;
     }
     if k == K.NEG { return cls(jj.f.aa[e]); }
+    if k == K.BIN || k == K.AND || k == K.OR { if cls(jj.f.aa[e]) != 0 || cls(jj.f.ab[e]) != 0 { return 2; } return 0; }
+    if k == K.OBJ {
+        var i = 0;
+        while i < jj.f.ab[e] {
+            if cls(jj.f.okey[jj.f.aa[e] + i]) != 0 || cls(jj.f.oval[jj.f.aa[e] + i]) != 0 { return 2; }
+            i += 1;
+        }
+        return 0;
+    }
     return 0;
 }
 
@@ -847,6 +926,14 @@ fn is_path(e: i64) -> bool {
     if k == K.ID { return true; }
     if k == K.FIELD || k == K.IDX { return is_path(jj.f.aa[e]); }
     return false;
+}
+
+// a variable slot made while analyzing (for the rewrites that bind generator outputs)
+fn new_slot() -> i64 {
+    if jj.f.nvars >= 60 { jj.err = "jx: too many variables in the filter"; return -1; }
+    let s = jj.f.nvars;
+    jj.f.nvars += 1;
+    return s;
 }
 
 fn want_node(n: i64) {
@@ -868,7 +955,7 @@ fn an_nav(e: i64, ctx: i64) -> i64 {
 // a step (.k, [n], []) on a generator: g | step. Rewrites node e in place; true when it did
 fn norm_step(e: i64) -> bool {
     let k = jj.f.ak[e];
-    if k != K.FIELD && k != K.IDX && k != K.ITER { return false; }
+    if k != K.FIELD && k != K.IDX && k != K.ITER && k != K.SLICE { return false; }
     if cls(jj.f.aa[e]) == 0 { return false; }
     let st = mk(k, mk(K.ID, 0, 0, 0, jj.f.at[e]), jj.f.ab[e], jj.f.ac[e], jj.f.at[e]);
     if st < 0 { return false; }
@@ -1115,21 +1202,31 @@ fn an(e: i64, ctx: i64, nxt: i64, direct: bool) -> i64 {
         var l = jj.f.aa[e];
         var r = jj.f.ab[e];
         if cls(l) != 0 || cls(r) != 0 {
-            // a generator next to a constant: g op c is g | (. op c)
-            if cls(l) != 0 && cls(r) == 0 && jj.f.ak[r] == K.LIT {
-                jj.f.ak[e] = K.PIPE;
-                let id = mk(K.ID, 0, 0, 0, jj.f.at[e]);
-                let nb = mk(k, id, r, jj.f.ac[e], jj.f.at[e]);
-                if nb < 0 { return -2; }
-                let g = l;
-                jj.f.aa[e] = g;
-                jj.f.ab[e] = nb;
-                return an(e, ctx, nxt, direct);
+            // generators in the operands: the right side is the outer loop (jq's order)
+            let t1 = new_slot();
+            let t2 = new_slot();
+            if t1 < 0 || t2 < 0 { return -2; }
+            let at = jj.f.at[e];
+            var inner = -1;
+            if k == K.BIN { inner = mk(K.BIN, mk(K.VAR, 0, 0, t2, at), mk(K.VAR, 0, 0, t1, at), jj.f.ac[e], at); }
+            else {
+                // and / or: the left decides, the right is only looked at when needed
+                let tb = mk(K.IF, r, mk(K.LIT, jj.ev.htrue, 0, 0, at), mk(K.LIT, jj.ev.hfalse, 0, 0, at), at);
+                if k == K.AND { inner = mk(K.IF, mk(K.VAR, 0, 0, t2, at), tb, mk(K.LIT, jj.ev.hfalse, 0, 0, at), at); }
+                else { inner = mk(K.IF, mk(K.VAR, 0, 0, t2, at), mk(K.LIT, jj.ev.htrue, 0, 0, at), tb, at); }
             }
-            if cls(r) != 0 && cls(l) == 0 && jj.f.ak[l] == K.LIT && cls(r) == 2 {
-                return reject("a generator as an operand", jj.f.at[e]) - 3;
+            if inner < 0 { return -2; }
+            if k == K.BIN {
+                let body = mk(K.AS, l, inner, t2, at);
+                let outer = mk(K.AS, r, body, t1, at);
+                if body < 0 || outer < 0 { return -2; }
+                copy_node(e, outer);
+            } else {
+                let outer = mk(K.AS, l, inner, t2, at);
+                if outer < 0 { return -2; }
+                copy_node(e, outer);
             }
-            return reject("a generator, `empty` or `select` as an operand (it multiplies the results)", jj.f.at[e]) - 3;
+            return an(e, ctx, nxt, direct);
         }
         if an(l, ctx, -1, false) == -2 { return -2; }
         if an(r, ctx, -1, false) == -2 { return -2; }
@@ -1145,12 +1242,29 @@ fn an(e: i64, ctx: i64, nxt: i64, direct: bool) -> i64 {
         return -1;
     }
     if k == K.NEG {
-        if cls(jj.f.aa[e]) != 0 { return reject("a generator as an operand", jj.f.at[e]) - 3; }
+        if cls(jj.f.aa[e]) != 0 {
+            let t = new_slot();
+            if t < 0 { return -2; }
+            let at = jj.f.at[e];
+            let outer = mk(K.AS, jj.f.aa[e], mk(K.NEG, mk(K.VAR, 0, 0, t, at), 0, 0, at), t, at);
+            if outer < 0 { return -2; }
+            copy_node(e, outer);
+            return an(e, ctx, nxt, direct);
+        }
         if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
         return -1;
     }
     if k == K.IF {
-        if cls(jj.f.aa[e]) != 0 { return reject("a generator or `select` as the condition of `if`", jj.f.at[e]) - 3; }
+        if cls(jj.f.aa[e]) != 0 {
+            let t = new_slot();
+            if t < 0 { return -2; }
+            let at = jj.f.at[e];
+            let inner = mk(K.IF, mk(K.VAR, 0, 0, t, at), jj.f.ab[e], jj.f.ac[e], at);
+            let outer = mk(K.AS, jj.f.aa[e], inner, t, at);
+            if inner < 0 || outer < 0 { return -2; }
+            copy_node(e, outer);
+            return an(e, ctx, nxt, direct);
+        }
         if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
         let a = an(jj.f.ab[e], ctx, nxt, false);
         if a == -2 { return -2; }
@@ -1244,6 +1358,31 @@ fn an(e: i64, ctx: i64, nxt: i64, direct: bool) -> i64 {
         if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
         return -1;
     }
+    if k == K.RANGE && (cls(jj.f.aa[e]) != 0 || cls(jj.f.ab[e]) != 0 || cls(jj.f.ac[e]) != 0) {
+        // generators as bounds: the first bound is the outermost loop
+        let at = jj.f.at[e];
+        var vs0 = jj.f.aa[e];
+        var vs1 = jj.f.ab[e];
+        var vs2 = jj.f.ac[e];
+        let s0 = new_slot();
+        let s1 = new_slot();
+        let s2 = new_slot();
+        if s0 < 0 || s1 < 0 || s2 < 0 { return -2; }
+        let inner = mk(K.RANGE, mk(K.VAR, 0, 0, s0, at), mk(K.VAR, 0, 0, s1, at), mk(K.VAR, 0, 0, s2, at), at);
+        if inner < 0 { return -2; }
+        let o2 = mk(K.AS, vs2, inner, s2, at);
+        let o1 = mk(K.AS, vs1, o2, s1, at);
+        let o0 = mk(K.AS, vs0, o1, s0, at);
+        if o0 < 0 { return -2; }
+        copy_node(e, o0);
+        return an(e, ctx, nxt, direct);
+    }
+    if k == K.SLICE {
+        if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
+        if jj.f.ab[e] >= 0 { if cls(jj.f.ab[e]) != 0 { return reject("a generator as a slice bound", jj.f.at[e]) - 3; } if an(jj.f.ab[e], ctx, -1, false) == -2 { return -2; } }
+        if jj.f.ac[e] >= 0 { if cls(jj.f.ac[e]) != 0 { return reject("a generator as a slice bound", jj.f.at[e]) - 3; } if an(jj.f.ac[e], ctx, -1, false) == -2 { return -2; } }
+        return -1;
+    }
     if k == K.RANGE {
         var i = 0;
         while i < 3 {
@@ -1280,7 +1419,34 @@ fn an(e: i64, ctx: i64, nxt: i64, direct: bool) -> i64 {
             let o = jj.f.aa[e] + i;
             let ke = jj.f.okey[o];
             let ve = jj.f.oval[o];
-            if cls(ke) != 0 || cls(ve) != 0 { return reject("a generator, `empty` or `select` inside an object (it multiplies the objects)", jj.f.at[e]) - 3; }
+            if cls(ke) != 0 || cls(ve) != 0 {
+                // generators among the entries: one object for each combination, the last entry is the outer loop
+                var body = mk(K.OBJ, jj.f.aa[e], jj.f.ab[e], 0, jj.f.at[e]);
+                if body < 0 { return -2; }
+                var m = 0;
+                while m < jj.f.ab[e] {
+                    let o2 = jj.f.aa[e] + m;
+                    let at = jj.f.at[e];
+                    if cls(jj.f.oval[o2]) != 0 {
+                        let t = new_slot();
+                        if t < 0 { return -2; }
+                        let src = jj.f.oval[o2];
+                        jj.f.oval[o2] = mk(K.VAR, 0, 0, t, at);
+                        body = mk(K.AS, src, body, t, at);
+                    }
+                    if cls(jj.f.okey[o2]) != 0 {
+                        let t = new_slot();
+                        if t < 0 { return -2; }
+                        let src = jj.f.okey[o2];
+                        jj.f.okey[o2] = mk(K.VAR, 0, 0, t, at);
+                        body = mk(K.AS, src, body, t, at);
+                    }
+                    if body < 0 { return -2; }
+                    m += 1;
+                }
+                copy_node(e, body);
+                return an(e, ctx, nxt, direct);
+            }
             if an(ke, ctx, -1, false) == -2 { return -2; }
             if an(ve, ctx, -1, false) == -2 { return -2; }
             i += 1;

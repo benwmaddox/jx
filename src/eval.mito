@@ -49,9 +49,10 @@ fn vdesc(doc: text, filter: text, h: i64) -> i64 {
     let t = tojson_of(doc, filter, h);
     if t < 0 { jj.ev.tmp3 = "?"; return 0; }
     let n = str_plain(doc, t, 3);
-    if n > 28 {
-        if jj.v.vt[h] == 5 { jj.ev.tmp3 = substr(jj.ev.tmp3, 0, 25) + "...\""; }
-        else { jj.ev.tmp3 = substr(jj.ev.tmp3, 0, 25) + "..."; }
+    if n > 29 {
+        let lc = byte_at(jj.ev.tmp3, n - 1);
+        if lc == 34 || lc == 93 || lc == 125 { jj.ev.tmp3 = substr(jj.ev.tmp3, 0, 25) + "..." + substr(jj.ev.tmp3, n - 1, 1); }
+        else { jj.ev.tmp3 = substr(jj.ev.tmp3, 0, 26) + "..."; }
     }
     return 0;
 }
@@ -699,6 +700,206 @@ fn cmp_objects(doc: text, filter: text, x: i64, y: i64) -> i64 {
     return 0;
 }
 
+// .[lo:hi] of a string (by characters), an array or null, as jq computes it
+fn slice_of(doc: text, filter: text, s: i64, lo: i64, hi: i64) -> i64 {
+    let t = jj.v.vt[s];
+    if t == 1 { return jj.ev.hnull; }
+    if t != 5 && t != 6 { return jqerr("Cannot index " + type_name(s) + " with object"); }
+    if (jj.v.vt[lo] != 4 && jj.v.vt[lo] != 1) || (jj.v.vt[hi] != 4 && jj.v.vt[hi] != 1) { return jqerr("Start and end indices of an array slice must be numbers"); }
+    var s2 = s;
+    var n = 0;
+    if t == 6 {
+        if jj.v.vs[s] == 0 { s2 = built_of(doc, s); if s2 < 0 { return -1; } }
+        n = jj.v.vf[s2];
+    } else {
+        let nb = str_plain(doc, s, 0);
+        var i = 0;
+        while i < nb { if (byte_at(jj.tmp, i) & 192) != 128 { n += 1; } i += 1; }
+    }
+    let nf = n as f64;
+    var ds = 0.0;
+    var de = nf;
+    if jj.v.vt[lo] == 4 { ds = numd(doc, filter, lo); }
+    if jj.v.vt[hi] == 4 { de = numd(doc, filter, hi); }
+    if ds != ds || de != de { return jqerr("Start and end indices of an array slice must be numbers"); }
+    if ds < 0.0 { ds = ds + nf; }
+    if de < 0.0 { de = de + nf; }
+    if ds < 0.0 { ds = 0.0; }
+    if ds > nf { ds = nf; }
+    if de > nf { de = nf; }
+    var st = ds as i64;
+    var en = de as i64;
+    if (en as f64) < de { en += 1; }
+    if en > n { en = n; }
+    if de < ds { st = 0; en = 0; }
+    if t == 6 {
+        let r = ent(6, 1, -1, -1);
+        if r < 0 { return -1; }
+        var p = jj.v.va[s2];
+        var i = 0;
+        var last = -1;
+        var cnt = 0;
+        while p >= 0 && i < en {
+            if i >= st {
+                let c = ent(jj.v.vt[p], jj.v.vs[p], jj.v.va[p], jj.v.vb[p]);
+                if c < 0 { return -1; }
+                jj.v.vf[c] = jj.v.vf[p];
+                jj.v.vx[c] = jj.v.vx[p];
+                jj.v.vd[c] = jj.v.vd[p];
+                if last >= 0 { jj.v.vn[last] = c; } else { jj.v.va[r] = c; }
+                last = c;
+                cnt += 1;
+            }
+            p = jj.v.vn[p];
+            i += 1;
+        }
+        if cnt == 0 { return jj.ev.harr0; }
+        jj.v.vb[r] = last;
+        jj.v.vf[r] = cnt;
+        return r;
+    }
+    // a string: the bytes of characters st .. en
+    let nb2 = len(jj.tmp);
+    var bi = 0;
+    var ci = 0;
+    var bs = nb2;
+    var be = nb2;
+    var found_s = false;
+    while bi < nb2 {
+        if (byte_at(jj.tmp, bi) & 192) != 128 {
+            if ci == st && !found_s { bs = bi; found_s = true; }
+            if ci == en { be = bi; break; }
+            ci += 1;
+        }
+        bi += 1;
+    }
+    if st >= n { bs = nb2; }
+    if be < bs { be = bs; }
+    jj.ev.tmp3 = substr(jj.tmp, bs, be - bs);
+    let off = len(jj.ev.scr);
+    jj.ev.scr += jj.ev.tmp3;
+    return ent(5, 2, off, be - bs);
+}
+
+// string repetition: jq 1.8 gives null for a negative count and at least one copy only from a count of 1
+fn repeat_string(doc: text, filter: text, s: i64, nv: i64) -> i64 {
+    let x = numd(doc, filter, nv);
+    if x != x || x < 0.0 { return jj.ev.hnull; }
+    let nb = str_plain(doc, s, 0);
+    var cnt = 0;
+    if x >= 1.0 { cnt = dtoi(x); }
+    if cnt == 0 || nb == 0 { jj.tmp = ""; return str_from_tmp(); }
+    if (nb as f64) * (cnt as f64) > 2147483647.0 { return jqerr("Repeat string result too long"); }
+    if nb * cnt > 15000000 { return fatal("a repeated string longer than 15 MB"); }
+    jj.ev.tmp3 = jj.tmp;
+    let off = len(jj.ev.scr);
+    var i = 0;
+    while i < cnt { jj.ev.scr += jj.ev.tmp3; i += 1; }
+    return ent(5, 2, off, nb * cnt);
+}
+
+// the string s split at the separator sep
+fn split_string(doc: text, filter: text, s: i64, sep: i64) -> i64 {
+    let ns = str_plain(doc, s, 0);
+    let nsep = str_plain(doc, sep, 2);
+    let r = ent(6, 1, -1, -1);
+    if r < 0 { return -1; }
+    if ns == 0 { return jj.ev.harr0; }
+    var last = -1;
+    var cnt = 0;
+    var start = 0;
+    var i = 0;
+    while i <= ns {
+        var cut = false;
+        var step = 1;
+        if i == ns { cut = true; }
+        else if nsep == 0 {
+            // every character
+            var k = i + 1;
+            while k < ns && (byte_at(jj.tmp, k) & 192) == 128 { k += 1; }
+            step = k - i;
+            cut = true;
+            // the piece is the character at i
+            let off = len(jj.ev.scr);
+            jj.ev.scr += substr(jj.tmp, i, step);
+            let c = ent(5, 2, off, step);
+            if c < 0 { return -1; }
+            if last >= 0 { jj.v.vn[last] = c; } else { jj.v.va[r] = c; }
+            last = c;
+            cnt += 1;
+            i += step;
+            continue;
+        } else if i + nsep <= ns && byte_at(jj.tmp, i) == byte_at(jj.ev.tmp2, 0) && substr(jj.tmp, i, nsep) == substr(jj.ev.tmp2, 0, nsep) {
+            cut = true;
+            step = nsep;
+        }
+        if cut {
+            let off = len(jj.ev.scr);
+            jj.ev.scr += substr(jj.tmp, start, i - start);
+            let c = ent(5, 2, off, i - start);
+            if c < 0 { return -1; }
+            if last >= 0 { jj.v.vn[last] = c; } else { jj.v.va[r] = c; }
+            last = c;
+            cnt += 1;
+            i += step;
+            start = i;
+            if i > ns { break; }
+        } else { i += 1; }
+    }
+    jj.v.vb[r] = last;
+    jj.v.vf[r] = cnt;
+    return r;
+}
+
+// the deep merge of two built objects: b's keys win, objects on both sides are merged
+fn deep_merge(doc: text, filter: text, x: i64, y: i64) -> i64 {
+    jj.ev.rec += 1;
+    if jj.ev.rec > 40 { jj.ev.rec -= 1; return fatal("`*` on objects nested more than 40 levels"); }
+    let r = ent(7, 1, -1, -1);
+    if r < 0 { return -1; }
+    var cnt = 0;
+    var p = jj.v.va[x];
+    while p >= 0 {
+        let pe = ent(0, 0, jj.v.va[p], jj.v.vb[p]);
+        if pe < 0 { return -1; }
+        if jj.v.vb[r] >= 0 { jj.v.vn[jj.v.vb[r]] = pe; } else { jj.v.va[r] = pe; }
+        jj.v.vb[r] = pe;
+        cnt += 1;
+        p = jj.v.vn[p];
+    }
+    p = jj.v.va[y];
+    while p >= 0 {
+        var q = jj.v.va[r];
+        var done = false;
+        while q >= 0 && !done {
+            if str_cmp(doc, jj.v.va[q], jj.v.va[p]) == 0 {
+                var a = jj.v.vb[q];
+                var b = jj.v.vb[p];
+                if jj.v.vt[a] >= 6 && jj.v.vs[a] == 0 { a = built_of(doc, a); }
+                if jj.v.vt[b] >= 6 && jj.v.vs[b] == 0 { b = built_of(doc, b); }
+                if a >= 0 && b >= 0 && jj.v.vt[a] == 7 && jj.v.vt[b] == 7 {
+                    let m = deep_merge(doc, filter, a, b);
+                    if m < 0 { return -1; }
+                    jj.v.vb[q] = m;
+                } else { jj.v.vb[q] = jj.v.vb[p]; }
+                done = true;
+            }
+            q = jj.v.vn[q];
+        }
+        if !done {
+            let pe = ent(0, 0, jj.v.va[p], jj.v.vb[p]);
+            if pe < 0 { return -1; }
+            if jj.v.vb[r] >= 0 { jj.v.vn[jj.v.vb[r]] = pe; } else { jj.v.va[r] = pe; }
+            jj.v.vb[r] = pe;
+            cnt += 1;
+        }
+        p = jj.v.vn[p];
+    }
+    jj.v.vf[r] = cnt;
+    jj.ev.rec -= 1;
+    return r;
+}
+
 fn dtoi(x: f64) -> i64 {
     if x >= 9223372036854775807.0 { return 9223372036854775807; }
     if x <= -9223372036854775807.0 { return -9223372036854775807 - 1; }
@@ -765,8 +966,15 @@ fn arith(doc: text, filter: text, op: i64, x: i64, y: i64) -> i64 {
         jj.v.vf[r] = cnt;
         return r;
     }
-    if op == 23 && ((tx == 5 && ty == 4) || (tx == 4 && ty == 5) || (tx == 7 && ty == 7)) { return fatal("`*` on strings or objects"); }
-    if op == 24 && tx == 5 && ty == 5 { return fatal("`/` on strings (split)"); }
+    if op == 23 && tx == 5 && ty == 4 { return repeat_string(doc, filter, x, y); }
+    if op == 23 && tx == 4 && ty == 5 { return repeat_string(doc, filter, y, x); }
+    if op == 23 && tx == 7 && ty == 7 {
+        let bx = built_of(doc, x);
+        let by = built_of(doc, y);
+        if bx < 0 || by < 0 { return -1; }
+        return deep_merge(doc, filter, bx, by);
+    }
+    if op == 24 && tx == 5 && ty == 5 { return split_string(doc, filter, x, y); }
     return jqerr(typed(doc, filter, x) + " and " + typed(doc, filter, y) + " cannot be " + op_word(op));
 }
 
@@ -1342,6 +1550,15 @@ fn evs(doc: text, filter: text, e: i64, v: i64) -> i64 {
         return evs(doc, filter, jj.f.ac[e], v);
     }
     if k == K.OBJ { return eval_obj(doc, filter, e, v); }
+    if k == K.SLICE {
+        let s = evs(doc, filter, jj.f.aa[e], v);
+        if s < 0 { return -1; }
+        var lo = jj.ev.hnull;
+        var hi = jj.ev.hnull;
+        if jj.f.ab[e] >= 0 { lo = evs(doc, filter, jj.f.ab[e], v); if lo < 0 { return -1; } }
+        if jj.f.ac[e] >= 0 { hi = evs(doc, filter, jj.f.ac[e], v); if hi < 0 { return -1; } }
+        return slice_of(doc, filter, s, lo, hi);
+    }
     if k == K.VAR { return jj.ev.vars[jj.f.ac[e]]; }
     if k == K.AS {
         let x = evs(doc, filter, jj.f.aa[e], v);
@@ -1443,6 +1660,17 @@ fn evs(doc: text, filter: text, e: i64, v: i64) -> i64 {
         if id == F.TOSTRING { return tostring_of(doc, filter, v); }
         if id == F.TONUMBER { return tonumber_of(doc, filter, v); }
         if id == F.TOJSON { return tojson_of(doc, filter, v); }
+        if id == F.TYPEMASK { return mk_bool(((jj.f.ad[e] >> jj.v.vt[v]) & 1) != 0); }
+        if id == F.TOBOOL {
+            let t = jj.v.vt[v];
+            if t == 2 || t == 3 { return v; }
+            if t == 5 {
+                let n = str_plain(doc, v, 0);
+                if n == 4 && substr(jj.tmp, 0, 4) == "true" { return jj.ev.htrue; }
+                if n == 5 && substr(jj.tmp, 0, 5) == "false" { return jj.ev.hfalse; }
+            }
+            return jqerr(typed(doc, filter, v) + " cannot be parsed as a boolean");
+        }
         return math_of(doc, filter, id, v);
     }
     return fatal("an expression of this kind where a single value is needed");
@@ -1562,6 +1790,13 @@ fn terminal(doc: text, filter: text, h: i64) -> i64 {
         jj.ev.stopto = r;
         return 1;
     }
+    if kind == 14 {
+        // skip: drop the first n outputs
+        let cnt = jj.ev.tc[tp];
+        jj.ev.tc[tp] = cnt + 1;
+        if cnt < jj.ev.tn[tp] { return 0; }
+        return emit_outer(doc, filter, r, h, tp);
+    }
     if kind == 12 {
         // nth: skip n outputs, then the next one
         let cnt = jj.ev.tc[tp];
@@ -1624,11 +1859,13 @@ fn limit_once(doc: text, filter: text, e: i64, v: i64, nv: i64) -> i64 {
     let lim = dtoi(numd(doc, filter, nv));
     if mode == 1 && lim < 0 { jqerr("limit doesn't support negative count"); return 1; }
     if mode == 5 && lim < 0 { jqerr("nth doesn't support negative indices"); return 1; }
+    if mode == 6 && lim < 0 { jqerr("skip doesn't support negative count"); return 1; }
     if mode == 1 && lim == 0 { return 0; }
     let idx = jj.ev.tp;
     if idx >= 60 { fatal("expressions nested too deeply"); return 1; }
     jj.ev.tk[idx] = 9;
     if mode == 5 { jj.ev.tk[idx] = 12; }
+    if mode == 6 { jj.ev.tk[idx] = 14; }
     jj.ev.ta[idx] = e;
     jj.ev.tc[idx] = 0;
     jj.ev.tn[idx] = lim;
