@@ -19,19 +19,24 @@ jx reads one document on standard input and takes the filter as its first argume
 indented output), `-r` (a string result is written raw) and `--validate` (below). Results are written after the whole document has been read; an error
 writes a message to standard error and exits with 1 (jq uses 2, 3 and 5), with nothing on standard output.
 
-**Options.** Every other jq option is refused by name before anything is read: `jx: option '-S' is not supported yet` for a jq option that is not built
-yet (`-n -s -e -S -C -M -a -j -f -L -R -h -V --tab --indent --arg --argjson --args --jsonargs --slurp --stream --seq --slurpfile --rawfile --help --version
---unbuffered --binary --strict --explain`), `jx: unknown option '-Z'` for anything else with a letter. jq exits with 2 on a usage error; a Mitochondria
-command-line program can only exit with 1 (a status of 400 or more), so jx exits with 1. What the runtime's flag handling (`runtime/cli.c`) does not let a
-program catch: an unknown long option written **after** the filter, and long options with a hyphen (`--raw-output`, `--sort-keys`, `--null-input`, ...), are not
-passed to the program at all and are silently ignored; an unknown long option written **before** the filter takes the filter as its value (jx then says
-"no filter given"). `--validate .a` is understood (the option gives the filter back).
+**Options.** jx parses its own arguments (the program takes the runtime's raw `args`), so an option is understood or refused wherever it is written, before or
+after the filter, long or short, combined (`-cr`): `-c`/`--compact-output`, `-r`/`--raw-output` and `--validate` are built; every other jq option is a hard error
+before anything is read, `jx: option '-S' is not supported yet` for a jq option jx does not have yet (`-a -j -s -n -e -S -C -M -f -L -R -h -V -b` and `--tab --indent
+--arg --argjson --args --jsonargs --slurp --stream --stream-errors --seq --slurpfile --rawfile --sort-keys --color-output --monochrome-output --ascii-output
+--join-output --raw-output0 --null-input --raw-input --exit-status --from-file --library-path --binary --unbuffered --help --version --build-configuration --strict
+--explain`), `jx: unknown option '--bogus'` for anything else. A second plain argument is an input file (`jx: input files are not supported yet`). No filter means
+`.` as in jq; `--` ends the options.
+
+**Exit codes** are jq's where the situation is the same: 2 for a usage error (above), 3 for a syntax error in the filter, 5 for invalid input and for an error raised
+while the filter runs (jq prints the results that came before the error first; jx writes nothing on standard output), 0 otherwise. Exit code 1 is jx's own: a filter that
+uses something Stage 2 does not support (`jx: not supported in Stage 2: ...`, found before any input is read) or a limit of jx (a full arena). The message goes to standard error.
 
 **Limits.** The input is up to 1 GiB (the literal in `doc: utf8<1073741824>` in `src/jx.mito`; the runtime reserves it and commits pages as they are read, so a small input
-costs nothing). The output area is 3 GiB (`Out.text`; the runtime allows 4 GiB - 1 for an answer but a field declared with that size misbehaves in the generated
-code, a Mitochondria issue reported with this stage). A 529 MB input, a 138 MB indented output and a 37 MB compact output were run. Strings with escapes are
-compared up to 1 MB (`J.tmp`); depth is 10000 like jq. Values built while evaluating live in an arena of 16 M entries at the document level and 1 M entries
-at each of three nesting depths of iterations; running out is a named error.
+costs nothing). The output buffer is 4 GiB - 1 (`Out.text`, the most a text field can hold; address space, committed as results are written). A 529 MB input, a 138 MB indented output
+and a 192 MB compact output were run. Strings with escapes are compared up to 1 MB (`J.tmp`); depth is 10000 like jq. Values built while evaluating live in an arena of 16 M entries at the
+document level and 1 M entries at each of three nesting depths of iterations; running out is a named error (exit 1). The arena arrays are what costs start-up time: a run
+of a tiny document takes 27 ms against Stage 1's 10 ms (jq 9 ms) because the runtime commits the arena's arrays at start, about 0.5 ms per million entries; a smaller arena
+(`Lim.REG0` and the array sizes of `Val` in `src/jx.mito`) trades collected-list capacity for that start-up time.
 
 ## What it supports
 
@@ -94,12 +99,11 @@ Details that matter:
 | Early exit with a damaged tail, or an outer repeated key after the exit point (decisions 2, 3) | answers | rejects the document / uses the last key |
 | `NaN`, `Infinity`, `01`, `1.`, `.5`, `+1`, more than one top-level value | rejected (strict JSON, one document) | accepted |
 | `.[]` over an object with duplicate keys | every value | only the last one per key (needs buffering) |
-| Runtime error after some results | no stdout, exit 1 | earlier results on stdout, exit 5 |
-| Malformed input, usage errors | exit 1 | exit 2 |
+| Runtime error or invalid input after some results | no stdout, exit 5 | earlier results on stdout, exit 5 |
 | A key with invalid UTF-8 matched by a filter key | compared as bytes | compared after replacement |
 | A non-ASCII character typed in the filter on Windows | mangled by the C runtime's narrow argv to `?` (jq too, from Git Bash): write `\u00e9` | same |
 | `tonumber` of `nan`, `Infinity`, `0x10` | an error | `nan` and `Infinity` are accepted |
-| Pretty output over 3 GiB, strings built by the filter over 16 MB | error naming the limit | prints |
+| Output over 4 GiB, strings built by the filter over 16 MB, an arena that is full | error naming the limit (exit 1) | prints |
 | `--strict` (design decision 1) | not implemented | n/a |
 
 ## Tests

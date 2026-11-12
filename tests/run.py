@@ -77,7 +77,7 @@ def check(case):
     eout = norm(eout)             # jq on Windows writes CRLF; jx writes LF
     grc, gout, gerr = run(JX, flags, filt, doc)
     if doc.startswith("rej_"): ok = grc != 0 and len(gerr) > 0 and len(gout) == 0   # jq accepts it, jx must refuse it (strict JSON, one document)
-    elif erc != 0: ok = grc != 0 and len(gerr) > 0
+    elif erc != 0: ok = grc != 0 and len(gerr) > 0 and (grc == erc or grc == 1)      # jq's exit code (2, 3, 5) or 1 for not supported
     else: ok = grc == 0 and gout == eout
     return case, ok, erc, grc
 
@@ -124,7 +124,7 @@ for filt in lines("syntax.txt"):
         q = subprocess.run(["jq", "-c", filt], stdin=f, capture_output=True)
     with open(T + "/docs/simple.json", "rb") as f:
         p = subprocess.run([JX, "-c", filt], stdin=f, capture_output=True)
-    if q.returncode != 0 and p.returncode == 1 and not p.stdout and b"syntax error" in p.stderr: syn_ok += 1
+    if q.returncode == 3 and p.returncode == 3 and not p.stdout and b"syntax error" in p.stderr: syn_ok += 1
     else: failures.append("syntax: %s (jq rc=%d, jx rc=%d, stderr=%r)" % (filt, q.returncode, p.returncode, p.stderr[:80]))
 nsyn = len(lines("syntax.txt"))
 # options: unknown or unsupported options are refused by name (jq exits 2; a program can only exit with 1)
@@ -134,23 +134,43 @@ opt_cases = [(["-Z", ".a"], b"unknown option '-Z'"), ([".a", "-Z"], b"unknown op
              (["-e", ".a"], b"'-e' is not supported yet"), (["-C", ".a"], b"'-C' is not supported yet"), (["--tab", ".a"], b"'--tab' is not supported yet"),
              ([".a", "--tab"], b"'--tab' is not supported yet"), (["--indent", "4", ".a"], b"'--indent' is not supported yet"),
              ([".a", "--indent", "4"], b"'--indent' is not supported yet"), (["--arg", "x", "1", ".a"], b"'--arg' is not supported yet"),
-             (["--indent=4", ".a"], b"'--indent' is not supported yet"), (["--bogus", ".a"], b"no filter given"), (["-c"], b"no filter given"),
-             ([], b"no filter given"), (["-cr", ".a"], b"")]
+             (["--indent=4", ".a"], b"'--indent' is not supported yet"), (["--bogus", ".a"], b"unknown option '--bogus'"), ([".a", "--bogus"], b"unknown option '--bogus'"),
+             (["--raw-output0", ".a"], b"'--raw-output0' is not supported yet"), (["--null-input", ".a"], b"'--null-input' is not supported yet"),
+             ([".a", "--sort-keys"], b"'--sort-keys' is not supported yet"), (["--exit-status", ".a"], b"'--exit-status' is not supported yet"),
+             (["-cS", ".a"], b"'-S' is not supported yet"), (["-cZ", ".a"], b"unknown option '-Z'"), ([".a", "other.json"], b"input files are not supported")]
 for args, want in opt_cases:
     with open(T + "/docs/simple.json", "rb") as f:
         p = subprocess.run([JX] + args, stdin=f, capture_output=True)
-    good = (p.returncode == 1 and not p.stdout and want in p.stderr) if want else (p.returncode == 1 and not p.stdout)
+    good = p.returncode == 2 and not p.stdout and want in p.stderr
     if good: opt_ok += 1
     else: failures.append("option: %s (rc=%d, stdout=%r, stderr=%r)" % (" ".join(args), p.returncode, p.stdout[:30], p.stderr[:80]))
+# accepted option forms, anywhere, and the default filter
+for args, want in (([".users[0].n", "-c"], b'"ann"\n'), (["-c", "--raw-output", ".users[0].n"], b"ann\n"), ([".users[0].n", "--compact-output", "-r"], b"ann\n"), (["-cr", ".users[0].n"], b"ann\n"),
+                   ([".users[0].n", "--", "-c"], None), (["--compact-output"], None)):
+    with open(T + "/docs/simple.json", "rb") as f:
+        p = subprocess.run([JX] + args, stdin=f, capture_output=True)
+    opt_n_extra = 1
+    if want is None: continue
+    if p.returncode == 0 and p.stdout.replace(b"\r\n", b"\n") == want: opt_ok += 1
+    else: failures.append("option form: %s (rc=%d, stdout=%r)" % (" ".join(args), p.returncode, p.stdout[:40]))
+    opt_cases.append(None)
+# exit codes as jq's: 3 syntax error in the filter, 5 an error while the filter runs or invalid input, 1 not supported
+exit_ok = 0
+exit_cases = [([".a |"], b'{"a":1}', 3), (["{a:"], b'{"a":1}', 3), ([".a.b"], b'{"a":1}', 5), (["error"], b'{"a":1}', 5), ([".a"], b'{"a":', 5), ([".a"], b'{"a":1} garbage', 5),
+              ([".[]"], b'1', 5), (["reduce range(3) as $x (0; .)"], b'1', 1), ([".a", "-Z"], b'1', 2), ([".a"], b'{"a":1}', 0), (["--validate", ".a"], b'{"a":1} x', 5)]
+for args, doc, want in exit_cases:
+    p = subprocess.run([JX, "-c"] + args, input=doc, capture_output=True)
+    if p.returncode == want and (want == 0 or (not p.stdout and p.stderr)): exit_ok += 1
+    else: failures.append("exit code: %s %r want %d got %d %r" % (args, doc, want, p.returncode, p.stderr[:60]))
 # --validate: reads the whole input and fails when anything follows the first value (jq: parse error, exit 2; jx exits 1)
 val_ok = 0
-for doc, flags, want_rc in ((b'{"a":{"x":1}}', ["--validate"], 0), (b'{"a":{"x":1},"b":garbage}', ["--validate"], 1), (b'{"a":{"x":1},"b":[1,2', ["--validate"], 1),
+for doc, flags, want_rc in ((b'{"a":{"x":1}}', ["--validate"], 0), (b'{"a":{"x":1},"b":garbage}', ["--validate"], 5), (b'{"a":{"x":1},"b":[1,2', ["--validate"], 5),
                             (b'{"a":{"x":1},"b":garbage}', [], 0)):
     p = subprocess.run([JX, "-c"] + flags + [".a.x"], input=doc, capture_output=True)
     if p.returncode == want_rc and (want_rc != 0 or True): val_ok += 1
     else: failures.append("validate: %r %s (rc=%d)" % (doc, flags, p.returncode))
 print("cases: %d against jq: %d pass, %d fail, %d expected differences (%d of them matched anyway); compile-time rejections: %d of %d ok; "
-      "syntax errors: %d of %d; options: %d of %d; --validate: %d of 4" % (len(cases), pass_n, fail_n, xd_n, xd_match, rej_ok, nrej, syn_ok, nsyn, opt_ok, len(opt_cases), val_ok))
+      "syntax errors: %d of %d; options: %d of %d; exit codes: %d of %d; --validate: %d of 4" % (len(cases), pass_n, fail_n, xd_n, xd_match, rej_ok, nrej, syn_ok, nsyn, opt_ok, len(opt_cases), exit_ok, len(exit_cases), val_ok))
 for r, n in sorted(by_reason.items(), key=lambda kv: -kv[1]): print("  expected difference observed: %5d  %s" % (n, r))
 open(T + "/early_exit_cases.txt", "w").write(chr(10).join(early_cases))
 open(T + "/failures.txt", "w").write(chr(10).join(failures))

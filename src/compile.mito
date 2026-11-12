@@ -22,11 +22,13 @@ const F {
 
 fn reject(what: text, p: i64) -> i64 {
     jj.err = "jx: not supported in Stage 2: " + what + " (filter position " + str(p) + ")";
+    jj.exitc = 1;
     return 1;
 }
 
 fn syntax(what: text, p: i64) -> i64 {
     jj.err = "jx: syntax error: " + what + " (filter position " + str(p) + ")";
+    jj.exitc = 3;
     return 1;
 }
 
@@ -335,7 +337,18 @@ fn parse_postfix(f: text, t0: i64) -> i64 {
             return -1;
         }
         if c == 63 {
-            t = mk(K.TRY, t, -1, 0, q);
+            // `E?` catches the errors of the last step only: `.a.b?` is `.a | (.b)?`
+            let tk = jj.f.ak[t];
+            if (tk == K.FIELD || tk == K.IDX || tk == K.ITER || tk == K.SLICE) && jj.f.ak[jj.f.aa[t]] != K.ID {
+                let src = jj.f.aa[t];
+                let st = mk(tk, mk(K.ID, 0, 0, 0, q), jj.f.ab[t], jj.f.ac[t], q);
+                if st < 0 { return -1; }
+                let tr = mk(K.TRY, st, -1, 0, q);
+                if tr < 0 { return -1; }
+                t = mk_pipe(src, tr, q);
+            } else {
+                t = mk(K.TRY, t, -1, 0, q);
+            }
             jj.cp = q + 1;
             continue;
         }

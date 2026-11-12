@@ -40,6 +40,7 @@ fn ev_init() {
 
 fn fatal(msg: text) -> i64 {
     jj.ev.err = 2;
+    jj.exitc = 1;
     jj.err = "jx: not supported in Stage 2: " + msg;
     return -1;
 }
@@ -65,6 +66,7 @@ fn typed(doc: text, filter: text, h: i64) -> text {
 
 fn jqerr(msg: text) -> i64 {
     jj.ev.err = 1;
+    jj.exitc = 5;
     jj.err = "jx: error: " + msg;
     jj.ev.rawmsg = msg;
     // the message as a value, for `catch`
@@ -81,6 +83,7 @@ fn ar_alloc(d: i64) -> i64 {
     let h = jj.v.top[d];
     if h >= jj.v.cap[d] {
         jj.ev.err = 2;
+        jj.exitc = 1;
         jj.err = "jx: out of value memory at nesting depth " + str(d) + " (the filter keeps more values than the arena holds)";
         return -1;
     }
@@ -1689,6 +1692,7 @@ fn evs(doc: text, filter: text, e: i64, v: i64) -> i64 {
 // raise the error whose value is x (a string gives the message)
 fn raise_value(doc: text, filter: text, x: i64) -> i64 {
     jj.ev.err = 1;
+    jj.exitc = 5;
     jj.ev.errv = x;
     if jj.v.vt[x] == 5 {
         let n = str_plain(doc, x, 0);

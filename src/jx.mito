@@ -114,7 +114,7 @@ struct Scan {
 }
 
 struct Out {
-    text: utf8<3221225472>;       // everything written (3 GiB: a field of 4 GiB - 1 misbehaves, see README)
+    text: utf8<1073741824>;       // everything written (3 GiB: a field of 4 GiB - 1 misbehaves, see README)
     sep: bool;                    // a result was written already: a newline comes first
     pretty: bool;
     raw: bool;
@@ -170,7 +170,7 @@ struct Ev {
     at: i64[64];                  // fold: 0 nothing yet, 1 a value (handle in ah), 2 a double
     ah: i64[64];
     scr: utf8<16777216>;          // scratch strings
-    ptx: utf8<268435456>;         // strings that outlive the element
+    ptx: utf8<16777216>;         // strings that outlive the element
     tmp2: utf8<1048576>;
     tmp3: utf8<1048576>;
     stk: i64[64];
@@ -215,6 +215,9 @@ struct J {
     an_depth: i64;                // compile: body nesting depth
     an_unit: i64;                 // compile: the unit node of the body being analyzed
     cdepth: i64;
+    exitc: i64;                   // the exit code of the error being reported: 1 not supported or a limit, 2 usage, 3 syntax, 5 invalid input or a runtime error
+    fs: i64;                      // the filter in the arguments
+    fe: i64;
     wv_used: i64;
     wv_bound: i64;
     noas: i64;                    // compile: 1 while the source of reduce is parsed (an `as` belongs to the reduce)
@@ -223,95 +226,126 @@ struct J {
 }
 state jj: J;
 
-// Options. The runtime (runtime/cli.c) turns every `-x` and `--name [value]` into an input of the program and ignores the ones the
-// program does not declare, so every letter and the identifier-shaped jq long options are declared here to be refused with a message.
-// Not catchable without a runtime change: an unknown long option written after the filter, and long options with a hyphen
-// (`--raw-output`, `--sort-keys`, `--null-input` ...), which are silently ignored; an unknown option with a value in front of the
-// filter takes the filter as its value ("no filter given"). jq exits with 2 on a usage error; a program can only exit with 1.
-// the input size is the one literal in `doc: utf8<N>` below (1 GiB; reserved address space, committed as the input is read)
-@main
-fn main(filter: utf8<0..1000>? from arg(0), doc: utf8<1073741824> from stdin, c: bool = false, r: bool = false, validate: utf8<0..1000>?, a: bool = false, b: bool = false, d: bool = false, e: bool = false, f: bool = false, g: bool = false, h: bool = false, i: bool = false, j: bool = false, k: bool = false, l: bool = false, m: bool = false, n: bool = false, o: bool = false, p: bool = false, q: bool = false, s: bool = false, t: bool = false, u: bool = false, v: bool = false, w: bool = false, x: bool = false, y: bool = false, z: bool = false, A: bool = false, B: bool = false, C: bool = false, D: bool = false, E: bool = false, F: bool = false, G: bool = false, H: bool = false, I: bool = false, J: bool = false, K: bool = false, L: bool = false, M: bool = false, N: bool = false, O: bool = false, P: bool = false, Q: bool = false, R: bool = false, S: bool = false, T: bool = false, U: bool = false, V: bool = false, W: bool = false, X: bool = false, Y: bool = false, Z: bool = false, tab: utf8<0..1000>?, indent: utf8<0..1000>?, arg: utf8<0..1000>?, argjson: utf8<0..1000>?, args: utf8<0..1000>?, jsonargs: utf8<0..1000>?, slurp: utf8<0..1000>?, stream: utf8<0..1000>?, seq: utf8<0..1000>?, slurpfile: utf8<0..1000>?, rawfile: utf8<0..1000>?, help: utf8<0..1000>?, version: utf8<0..1000>?, unbuffered: utf8<0..1000>?, binary: utf8<0..1000>?, strict: utf8<0..1000>?, explain: utf8<0..1000>?) -> Response<text> {
-    if a { return status(400, "jx: option '-a' is not supported yet"); }
-    if b { return status(400, "jx: unknown option '-b'"); }
-    if d { return status(400, "jx: unknown option '-d'"); }
-    if e { return status(400, "jx: option '-e' is not supported yet"); }
-    if f { return status(400, "jx: option '-f' is not supported yet"); }
-    if g { return status(400, "jx: unknown option '-g'"); }
-    if h { return status(400, "jx: option '-h' is not supported yet"); }
-    if i { return status(400, "jx: unknown option '-i'"); }
-    if j { return status(400, "jx: option '-j' is not supported yet"); }
-    if k { return status(400, "jx: unknown option '-k'"); }
-    if l { return status(400, "jx: unknown option '-l'"); }
-    if m { return status(400, "jx: unknown option '-m'"); }
-    if n { return status(400, "jx: option '-n' is not supported yet"); }
-    if o { return status(400, "jx: unknown option '-o'"); }
-    if p { return status(400, "jx: unknown option '-p'"); }
-    if q { return status(400, "jx: unknown option '-q'"); }
-    if s { return status(400, "jx: option '-s' is not supported yet"); }
-    if t { return status(400, "jx: unknown option '-t'"); }
-    if u { return status(400, "jx: unknown option '-u'"); }
-    if v { return status(400, "jx: unknown option '-v'"); }
-    if w { return status(400, "jx: unknown option '-w'"); }
-    if x { return status(400, "jx: unknown option '-x'"); }
-    if y { return status(400, "jx: unknown option '-y'"); }
-    if z { return status(400, "jx: unknown option '-z'"); }
-    if A { return status(400, "jx: unknown option '-A'"); }
-    if B { return status(400, "jx: unknown option '-B'"); }
-    if C { return status(400, "jx: option '-C' is not supported yet"); }
-    if D { return status(400, "jx: unknown option '-D'"); }
-    if E { return status(400, "jx: unknown option '-E'"); }
-    if F { return status(400, "jx: unknown option '-F'"); }
-    if G { return status(400, "jx: unknown option '-G'"); }
-    if H { return status(400, "jx: unknown option '-H'"); }
-    if I { return status(400, "jx: unknown option '-I'"); }
-    if J { return status(400, "jx: unknown option '-J'"); }
-    if K { return status(400, "jx: unknown option '-K'"); }
-    if L { return status(400, "jx: option '-L' is not supported yet"); }
-    if M { return status(400, "jx: option '-M' is not supported yet"); }
-    if N { return status(400, "jx: unknown option '-N'"); }
-    if O { return status(400, "jx: unknown option '-O'"); }
-    if P { return status(400, "jx: unknown option '-P'"); }
-    if Q { return status(400, "jx: unknown option '-Q'"); }
-    if R { return status(400, "jx: option '-R' is not supported yet"); }
-    if S { return status(400, "jx: option '-S' is not supported yet"); }
-    if T { return status(400, "jx: unknown option '-T'"); }
-    if U { return status(400, "jx: unknown option '-U'"); }
-    if V { return status(400, "jx: option '-V' is not supported yet"); }
-    if W { return status(400, "jx: unknown option '-W'"); }
-    if X { return status(400, "jx: unknown option '-X'"); }
-    if Y { return status(400, "jx: unknown option '-Y'"); }
-    if Z { return status(400, "jx: unknown option '-Z'"); }
-    if tab != null { return status(400, "jx: option '--tab' is not supported yet"); }
-    if indent != null { return status(400, "jx: option '--indent' is not supported yet"); }
-    if arg != null { return status(400, "jx: option '--arg' is not supported yet"); }
-    if argjson != null { return status(400, "jx: option '--argjson' is not supported yet"); }
-    if args != null { return status(400, "jx: option '--args' is not supported yet"); }
-    if jsonargs != null { return status(400, "jx: option '--jsonargs' is not supported yet"); }
-    if slurp != null { return status(400, "jx: option '--slurp' is not supported yet"); }
-    if stream != null { return status(400, "jx: option '--stream' is not supported yet"); }
-    if seq != null { return status(400, "jx: option '--seq' is not supported yet"); }
-    if slurpfile != null { return status(400, "jx: option '--slurpfile' is not supported yet"); }
-    if rawfile != null { return status(400, "jx: option '--rawfile' is not supported yet"); }
-    if help != null { return status(400, "jx: option '--help' is not supported yet"); }
-    if version != null { return status(400, "jx: option '--version' is not supported yet"); }
-    if unbuffered != null { return status(400, "jx: option '--unbuffered' is not supported yet"); }
-    if binary != null { return status(400, "jx: option '--binary' is not supported yet"); }
-    if strict != null { return status(400, "jx: option '--strict' is not supported yet"); }
-    if explain != null { return status(400, "jx: option '--explain' is not supported yet"); }
-    // `--validate FILTER` takes the filter as its value: give it back
-    var rc = 0;
-    if validate != null && filter == null && validate != "true" { rc = go(validate, doc, c, r, true); }
-    else if filter == null { return status(400, "jx: no filter given (an option with a value may have taken it: write the filter first, or use `--option=value`)"); }
-    else { rc = go(filter, doc, c, r, validate != null); }
-    if rc != 0 { return status(400, jj.err); }
-    if jj.o.results > 0 { jj.o.text += "\n"; }
-    return ok(jj.o.text);
+// Options. The program does its own parsing: it takes `args` (every argument as written, each followed by a 0 byte), so every option
+// wherever it appears, long, short or combined (`-cr`), reaches it and unknown ones are a hard error. Exit codes as jq's where jx
+// has the same situation: 2 for a usage error (an unknown option, an option jx does not have yet, an input file), 3 for a syntax
+// error in the filter, 5 for invalid input and for an error raised while the filter runs; 1 for a filter jx does not support yet
+// and for the limits of jx (an arena that is full). The error text goes to standard error, nothing to standard output.
+
+// is the argument at [s, e) of args equal to w?
+fn arg_is(args: text, s: i64, e: i64, w: text) -> bool {
+    if e - s != len(w) { return false; }
+    return substr(args, s, e - s) == w;
 }
 
-fn go(filter: text, doc: text, c: bool, r: bool, check: bool) -> i64 {
-    jj.o.pretty = !c;
-    jj.o.raw = r;
-    jj.sc.validate = check;
+// the usage error for the option at [s, e)
+fn usage_error(args: text, s: i64, e: i64, supported_name: bool) -> i64 {
+    jj.exitc = 2;
+    if supported_name { jj.err = "jx: option '" + substr(args, s, e - s) + "' is not supported yet"; }
+    else { jj.err = "jx: unknown option '" + substr(args, s, e - s) + "'"; }
+    return 2;
+}
+
+// a jq long option that jx does not have yet
+fn known_long(args: text, s: i64, e: i64) -> bool {
+    if arg_is(args, s, e, "--tab") || arg_is(args, s, e, "--indent") || arg_is(args, s, e, "--arg") || arg_is(args, s, e, "--argjson") { return true; }
+    if arg_is(args, s, e, "--args") || arg_is(args, s, e, "--jsonargs") || arg_is(args, s, e, "--slurp") || arg_is(args, s, e, "--stream") { return true; }
+    if arg_is(args, s, e, "--stream-errors") || arg_is(args, s, e, "--seq") || arg_is(args, s, e, "--slurpfile") || arg_is(args, s, e, "--rawfile") { return true; }
+    if arg_is(args, s, e, "--sort-keys") || arg_is(args, s, e, "--color-output") || arg_is(args, s, e, "--monochrome-output") { return true; }
+    if arg_is(args, s, e, "--ascii-output") || arg_is(args, s, e, "--join-output") || arg_is(args, s, e, "--raw-output0") || arg_is(args, s, e, "--null-input") { return true; }
+    if arg_is(args, s, e, "--raw-input") || arg_is(args, s, e, "--exit-status") || arg_is(args, s, e, "--from-file") || arg_is(args, s, e, "--library-path") { return true; }
+    if arg_is(args, s, e, "--binary") || arg_is(args, s, e, "--unbuffered") || arg_is(args, s, e, "--help") || arg_is(args, s, e, "--version") { return true; }
+    if arg_is(args, s, e, "--build-configuration") || arg_is(args, s, e, "--strict") || arg_is(args, s, e, "--explain") { return true; }
+    return false;
+}
+
+// a short option letter of jq that jx does not have yet
+fn known_short(c: i64) -> bool {
+    return c == 97 || c == 106 || c == 115 || c == 110 || c == 101 || c == 83 || c == 67 || c == 77 || c == 102 || c == 76 || c == 82 || c == 104 || c == 86 || c == 98;
+}
+
+// the arguments: sets jj.o.pretty, jj.o.raw, jj.sc.validate, the filter at [jj.fs, jj.fe) of args; 0, or 2 with the message in jj.err
+fn parse_opts(args: text) -> i64 {
+    jj.o.pretty = true;
+    jj.o.raw = false;
+    jj.sc.validate = false;
+    jj.fs = -1;
+    jj.fe = -1;
+    var s = 0;
+    var only_positional = false;
+    let n = len(args);
+    while s < n {
+        var e = s;
+        while e < n && byte_at(args, e) != 0 { e += 1; }
+        let c0 = byte_at(args, s);
+        // an option starts with `-` and a letter or a second `-`; a filter may start with `-` (`-1`, `-.a`, `-(.a)`)
+        let c1 = byte_at(args, s + 1);
+        let optish = c1 == 45 || (c1 >= 97 && c1 <= 122) || (c1 >= 65 && c1 <= 90);
+        if !only_positional && c0 == 45 && e - s > 1 && optish {
+            if byte_at(args, s + 1) == 45 {
+                // a long option
+                if e - s == 2 { only_positional = true; }
+                else if arg_is(args, s, e, "--compact-output") { jj.o.pretty = false; }
+                else if arg_is(args, s, e, "--raw-output") { jj.o.raw = true; }
+                else if arg_is(args, s, e, "--validate") { jj.sc.validate = true; }
+                else if known_long(args, s, e) { return usage_error(args, s, e, true); }
+                else {
+                    // an `--name=value` form of a known option
+                    var q = s;
+                    while q < e && byte_at(args, q) != 61 { q += 1; }
+                    if q < e && known_long(args, s, q) { return usage_error(args, s, q, true); }
+                    return usage_error(args, s, q, false);
+                }
+            } else {
+                // short options, possibly combined
+                var k = s + 1;
+                while k < e {
+                    let c = byte_at(args, k);
+                    if c == 99 { jj.o.pretty = false; }
+                    else if c == 114 { jj.o.raw = true; }
+                    else {
+                        jj.exitc = 2;
+                        let one = "-" + substr(args, k, 1);
+                        if known_short(c) { jj.err = "jx: option '" + one + "' is not supported yet"; }
+                        else { jj.err = "jx: unknown option '" + one + "'"; }
+                        return 2;
+                    }
+                    k += 1;
+                }
+            }
+        } else if jj.fs < 0 {
+            jj.fs = s;
+            jj.fe = e;
+        } else {
+            jj.exitc = 2;
+            jj.err = "jx: input files are not supported yet (jx reads standard input): '" + substr(args, s, e - s) + "'";
+            return 2;
+        }
+        s = e + 1;
+    }
+    return 0;
+}
+
+// the input size is the one literal in `doc: utf8<N>` below (1 GiB; reserved address space, committed as the input is read)
+@main
+fn main(args: utf8<0..1048576> from args, doc: utf8<1073741824> from stdin) -> Response<text> {
+    jj.exitc = 1;
+    var rc = parse_opts(args);
+    if rc == 0 {
+        if jj.fs < 0 { rc = go(".", doc); }
+        else { rc = go(substr(args, jj.fs, jj.fe - jj.fs), doc); }
+    }
+    if rc == 0 {
+        if jj.o.results > 0 { jj.o.text += "\n"; }
+        return ok(jj.o.text);
+    }
+    if jj.exitc == 2 { return exit_error(2, jj.err + "\n"); }
+    if jj.exitc == 3 { return exit_error(3, jj.err + "\n"); }
+    if jj.exitc == 5 { return exit_error(5, jj.err + "\n"); }
+    return status(400, jj.err);
+}
+
+fn go(filter: text, doc: text) -> i64 {
     num_init();
     ev_init();
     if compile(filter) != 0 { return 1; }

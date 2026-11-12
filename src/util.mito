@@ -37,5 +37,6 @@ fn hex4(t: text, p: i64) -> i64 {
 // an error: the message and where, for the caller to return
 fn fail_at(msg: text, p: i64) -> i64 {
     jj.err = "jx: " + msg + " (at byte " + str(p) + ")";
+    jj.exitc = 5;
     return -1;
 }

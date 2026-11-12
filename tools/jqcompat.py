@@ -606,7 +606,7 @@ def classify_record(c, tool, rc, out, err):
             return "rejected", False, "needs -L modules"
         if not out and rc == 2:
             return "rejected", False, "option not supported"
-        if not out and rc == 1 and ("not supported" in errt or "syntax error" in errt):
+        if not out and rc in (1, 3) and ("not supported" in errt or "syntax error" in errt):
             return "rejected", False, "not supported" if "not supported" in errt else "syntax error (unsupported syntax)"
         exp = [jload(x) for x in c["expected"]]
         got = parse_out(out)

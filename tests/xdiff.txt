@@ -32,3 +32,4 @@ dup|*|.users[]|duplicate keys inside a copied object are copied as written, jq k
 dup|*|.users|duplicate keys inside a copied object are copied as written, jq keeps one (decision 1)
 dup|*|.|duplicate keys inside a copied object are copied as written, jq keeps one (decision 1)
 deep9999|*|*|pretty output of 9999 nested containers is about 200 MB, over the 32 MB output area (declared size)
+dup|-c|*|a document with duplicate keys: containers are copied or built as written and counted with every key, jq keeps the last (decision 1)
