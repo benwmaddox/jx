@@ -69,13 +69,7 @@ input), so the output cost of large results grows beyond linear. This is the 5.4
 
 ### 1.4 Output sink
 
-| filter | to NUL | to a file |
-| --- | --- | --- |
-| `.users \| length` | 57.7 | 57.4 |
-| `.users[] \| {n: .n, c: .addr.city}` | 146.0 | 147.4 |
-| `.users[] \| .age + 1` | 111.8 | 111.3 |
-
-The write system call is not visible (6 MB written once); output cost is formatting and the page faults of the buffer, not the sink.
+NUL against a file (25 runs): `length` 57.7 / 57.4, `{n, c}` 146.0 / 147.4, `.age + 1` 111.8 / 111.3. The write system call is not visible (6 MB written once); output cost is formatting and the page faults of the buffer, not the sink.
 
 ### 1.5 Startup (tiny document, 40 alternating runs, median ms)
 
@@ -477,7 +471,6 @@ differential run shows no difference on them; the stage's timing row is appended
 7. Run all suites of section 6 on the tree build (must be unchanged), the differential on the subset (0 differences), and append the stage 1 timing
    row to `docs/progress.md` (15.5 MB: the six filters of 1.2; tiny; peak memory).
 8. Review point before stage 2: report the dispatch cost per element measured in the real engine against the 2-10 ns of section 2.3.
-
 ## 10. Risks and decisions
 
 Risks:
@@ -490,10 +483,9 @@ Risks:
 3. **Startup depends on the Mitochondria runtime**: if arrays cannot be reserved without commit, the 13.6 ms stays unless capacity is cut; the
    bytecode engine does not help this at all. Related: the 5.6 ms per GiB of `Out.text` is a cost on every run for a capacity few runs use.
 
-Other risks: the 8192-instruction and 256-register limits turn some large filters into "too big" errors (a limit to state in the README); the
+Also: the 8192-instruction and 256-register limits turn some large filters into "too big" errors (a limit to state in the README); the
 explicit return stack changes where the "nested too deeply" error triggers; the micro-benchmarks of section 2 are best-case and will overstate
 the interpreter's speed.
-
 Decisions for the owner:
 - Startup: smaller default arrays (and what capacity errors mean), a Mitochondria runtime change (reserve-only arrays), or accepting 27 ms.
 - Whether stage 7 (spans, streaming construction) is in the commitment now; they are where the speedup is.
