@@ -1,0 +1,121 @@
+// jx: a jq-compatible extractor that reads its input once, front to back (docs/design.md, Stage 1).
+//   jx.mito      this file: the state and `@main`
+//   util.mito    small helpers
+//   compile.mito the filter text -> a path automaton (a trie of wanted paths) and a slot program
+//   scan.mito    the scanner: one forward pass, validating, filling slots, running the program at unit ends
+//   prog.mito    the slot program: compare, length, output
+//   out.mito     writing values the way jq does (compact or indented, numbers and strings normalized)
+// Nothing is allocated at run time; every size is declared here.
+
+platform cli;
+
+const Lim {
+    MAX_DEPTH: i64 = 10000;      // nesting depth of the input (jq's own limit)
+    NODES: i64 = 64;             // nodes in the path automaton
+    ENTRIES: i64 = 62;           // child entries (keys, indexes, iterations) in the automaton
+    PROG: i64 = 64;              // instructions of the slot program
+    LITS: i64 = 32;              // literals in select(...) comparisons
+}
+
+// the filter, compiled
+struct Filt {
+    nn: i64;                      // nodes used; node 0 is the document
+    ne: i64;                      // child entries used (entry ids start at 1; 0 means none)
+    nwant: i64;                   // nodes whose value a slot holds
+    nunit: i64;                   // the node whose completion runs the program (an element), -1: the document
+    npr: i64;                     // instructions
+    nlit: i64;
+    par: i64[64];                 // per node: its parent, -1 for the root
+    want: i64[64];                // 1 when a slot keeps the node's value
+    unit: i64[64];                // 1 for the unit node
+    stream: i64[64];              // 1 when the unit is at or below the node
+    nfirst: i64[64];              // first child entry of the node, 0 none
+    niter: i64[64];               // the node reached by `[]`, -1 none
+    nkeys: i64[64];               // children by key
+    nidx: i64[64];                // children by index
+    ekind: i64[63];               // 0 key, 1 index
+    ea: i64[63];                  // key: offset in `keys`; index: the number
+    eb: i64[63];                  // key: length
+    ef: i64[63];                  // key: its first byte
+    enode: i64[63];
+    enext: i64[63];
+    keys: utf8<4096>;             // wanted keys, unescaped
+    lits: utf8<4096>;             // string literals, unescaped
+    // the slot program: op, slot (a node), argument
+    pop: i64[64];
+    pslot: i64[64];
+    parg: i64[64];
+    // literals: kind (1 null, 2 false, 3 true, 4 number, 5 string), where (number: span in the filter text; string: offset in `lits`)
+    lkind: i64[32];
+    la: i64[32];
+    lb: i64[32];
+}
+
+// the scanner's stack and the slots
+struct Scan {
+    sp: i64;                      // open containers
+    exit_depth: i64;              // when every slot is filled: the depth of the container to finish, then stop (0 none)
+    ugen: i64;                    // the unit's generation: a slot is filled when its sgen equals this
+    nfilled: i64;
+    esc: i64;                     // set by scan_string: the string has a backslash or a DEL
+    fnode: i64[10002];            // per open container: its automaton node, -1 when skipped
+    fkind: i64[10002];            // 6 array, 7 object
+    fcnt: i64[10002];             // elements or keys so far
+    fstart: i64[10002];           // where it starts
+    fseen: i64[10002];            // bit per child entry already matched in this object
+    sgen: i64[64];                // per node (the slot)
+    stag: i64[64];                // 4 number, 5 string, 6 array, 7 object, 1 null, 2 false, 3 true
+    sa: i64[64];
+    sb: i64[64];
+    scnt: i64[64];
+    sesc: i64[64];
+}
+
+struct Out {
+    text: utf8<33554432>;         // everything written
+    sep: bool;                    // a result was written already: a newline comes first
+    pretty: bool;
+    raw: bool;
+    results: i64;
+}
+
+// two numbers being compared, as decimals
+struct Dec {
+    neg: bool;
+    zero: bool;
+    ds: i64;                      // where the significant digits start (integer digits then fraction digits)
+    ilen: i64;                    // integer digits from ds
+    fs: i64;                      // where the fraction digits start
+    k: i64;                       // index of the first significant digit
+    nd: i64;                      // significant digit count (no leading or trailing zeros)
+    adj: i64;                     // exponent of the leading digit plus one: value in [10^(adj-1), 10^adj)
+}
+
+struct J {
+    f: Filt;
+    sc: Scan;
+    o: Out;
+    d1: Dec;
+    d2: Dec;
+    tmp: utf8<1048576>;           // an unescaped string for comparing
+    err: utf8<300>;
+    cp: i64;                      // the filter compiler's cursor
+    f_iter: i64;                  // set when a path just parsed took a `[]`
+}
+state j: J;
+
+@main
+fn main(filter: utf8<1..1000> from arg(0), doc: utf8<2000000> from stdin, c: bool = false, r: bool = false) -> Response<text> {
+    j.o.pretty = !c;
+    j.o.raw = r;
+    if compile(filter) != 0 { return status(400, j.err); }
+    if scan(doc, filter) != 0 { return status(400, j.err); }
+    if j.o.results > 0 { j.o.text += "\n"; }
+    return ok(j.o.text);
+}
+
+use "util.mito";
+use "compile.mito";
+use "scan.mito";
+use "prog.mito";
+use "out.mito";

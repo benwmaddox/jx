@@ -1,0 +1,313 @@
+// The scanner: reads the document once, front to back. A stack of open containers says where it is; each container holds the
+// automaton node it belongs to (-1 for a container nobody wants: it is only skipped, but still checked). A value is a span
+// (start, end) in the input; the slots keep the spans of the wanted values, and the program runs when a unit ends.
+// Tags are jq's type order: 1 null, 2 false, 3 true, 4 number, 5 string, 6 array, 7 object.
+
+// the position after the string that starts at p (its quote), or -1 with j.err set. Sets j.sc.esc when it has an escape or a DEL.
+fn scan_string(doc: text, p: i64) -> i64 {
+    var i = p + 1;
+    j.sc.esc = 0;
+    while true {
+        let c = byte_at(doc, i);
+        if c == 34 { return i + 1; }
+        if c >= 32 && c != 92 && c != 127 { i += 1; continue; }
+        if c < 0 { return fail_at("unfinished string", i); }
+        if c == 127 { j.sc.esc = 1; i += 1; continue; }
+        if c < 32 { return fail_at("control character in string", i); }
+        // a backslash
+        j.sc.esc = 1;
+        let d = byte_at(doc, i + 1);
+        if d == 117 {
+            let h = hex4(doc, i + 2);
+            if h < 0 { return fail_at("invalid \\u escape", i); }
+            if h >= 55296 && h <= 56319 {
+                if byte_at(doc, i + 6) != 92 || byte_at(doc, i + 7) != 117 { return fail_at("invalid surrogate pair escape", i); }
+                let l = hex4(doc, i + 8);
+                if l < 56320 || l > 57343 { return fail_at("invalid surrogate pair escape", i); }
+                i += 12;
+            } else {
+                i += 6;
+            }
+            continue;
+        }
+        if d == 34 || d == 92 || d == 47 || d == 98 || d == 102 || d == 110 || d == 114 || d == 116 { i += 2; continue; }
+        return fail_at("invalid escape", i);
+    }
+    return -1;
+}
+
+fn is_digit(c: i64) -> bool {
+    return c >= 48 && c <= 57;
+}
+
+// the position after the number at p (strict JSON grammar), or -1
+fn scan_number(doc: text, p: i64) -> i64 {
+    var i = p;
+    if byte_at(doc, i) == 45 { i += 1; }
+    let c = byte_at(doc, i);
+    if c == 48 { i += 1; }
+    else if c >= 49 && c <= 57 {
+        i += 1;
+        while is_digit(byte_at(doc, i)) { i += 1; }
+    } else { return fail_at("invalid number", p); }
+    if byte_at(doc, i) == 46 {
+        i += 1;
+        if !is_digit(byte_at(doc, i)) { return fail_at("invalid number", p); }
+        while is_digit(byte_at(doc, i)) { i += 1; }
+    }
+    let e = byte_at(doc, i);
+    if e == 101 || e == 69 {
+        i += 1;
+        let s = byte_at(doc, i);
+        if s == 43 || s == 45 { i += 1; }
+        if !is_digit(byte_at(doc, i)) { return fail_at("invalid number", p); }
+        while is_digit(byte_at(doc, i)) { i += 1; }
+    }
+    return i;
+}
+
+// the position after `true`, `false` or `null` at p, or -1; the tag in j.sc.esc
+fn scan_literal(doc: text, p: i64) -> i64 {
+    let c = byte_at(doc, p);
+    if c == 116 && substr(doc, p, 4) == "true" { j.sc.esc = 3; return p + 4; }
+    if c == 102 && substr(doc, p, 5) == "false" { j.sc.esc = 2; return p + 5; }
+    if c == 110 && substr(doc, p, 4) == "null" { j.sc.esc = 1; return p + 4; }
+    return fail_at("invalid literal", p);
+}
+
+// the node for element k of an array whose node is `node`
+fn elem_node(node: i64, k: i64) -> i64 {
+    if node < 0 { return -1; }
+    let it = j.f.niter[node];
+    if it >= 0 { return it; }
+    if j.f.nidx[node] == 0 { return -1; }
+    var e = j.f.nfirst[node];
+    while e != 0 {
+        if j.f.ekind[e] == 1 && j.f.ea[e] == k { return j.f.enode[e]; }
+        e = j.f.enext[e];
+    }
+    return -1;
+}
+
+fn describe(tag: i64) -> text {
+    if tag == 1 { return "null"; }
+    if tag == 2 || tag == 3 { return "boolean"; }
+    if tag == 4 { return "number"; }
+    if tag == 5 { return "string"; }
+    if tag == 6 { return "array"; }
+    return "object";
+}
+
+// a value of type `tag` where the filter indexes into it: jq's error, except that null indexes to null
+fn index_error(node: i64, tag: i64, p: i64) -> i64 {
+    if tag == 1 {
+        if j.f.niter[node] >= 0 { return fail_at("Cannot iterate over null", p); }
+        return 0;
+    }
+    if j.f.niter[node] >= 0 {
+        if tag == 6 || tag == 7 { return 0; }
+        return fail_at("Cannot iterate over " + describe(tag), p);
+    }
+    if j.f.nkeys[node] != 0 && tag != 7 { return fail_at("Cannot index " + describe(tag) + " with a string key", p); }
+    if j.f.nidx[node] != 0 && tag != 6 { return fail_at("Cannot index " + describe(tag) + " with number", p); }
+    return 0;
+}
+
+// is `a` the node `anc` or below it?
+fn is_below(a: i64, anc: i64) -> bool {
+    var n = a;
+    while n >= 0 {
+        if n == anc { return true; }
+        n = j.f.par[n];
+    }
+    return false;
+}
+
+// a key matched again in the same object: the last one wins, so what the first one filled is forgotten
+fn forget_below(node: i64) {
+    var w = 0;
+    while w < j.f.nn {
+        if j.f.want[w] != 0 && j.sc.sgen[w] == j.sc.ugen && is_below(w, node) {
+            j.sc.sgen[w] = -1;
+            j.sc.nfilled -= 1;
+        }
+        w += 1;
+    }
+}
+
+// a value for `node` ended: keep it in its slot; at a unit's end run the program
+fn value_done(doc: text, filter: text, node: i64, tag: i64, a: i64, b: i64, cnt: i64, esc: i64) -> i64 {
+    if node < 0 { return 0; }
+    if j.f.want[node] != 0 {
+        if j.sc.sgen[node] != j.sc.ugen { j.sc.nfilled += 1; }
+        j.sc.sgen[node] = j.sc.ugen;
+        j.sc.stag[node] = tag;
+        j.sc.sa[node] = a;
+        j.sc.sb[node] = b;
+        j.sc.scnt[node] = cnt;
+        j.sc.sesc[node] = esc;
+        if j.f.nunit < 0 && j.sc.nfilled == j.f.nwant && j.sc.exit_depth == 0 { j.sc.exit_depth = j.sc.sp; }
+    }
+    if j.f.unit[node] != 0 {
+        let rc = run_program(doc, filter);
+        j.sc.ugen += 1;
+        j.sc.nfilled = 0;
+        return rc;
+    }
+    return 0;
+}
+
+fn close_frame(doc: text, filter: text, p: i64) -> i64 {
+    let sp = j.sc.sp;
+    j.sc.sp = sp - 1;
+    return value_done(doc, filter, j.sc.fnode[sp], j.sc.fkind[sp], j.sc.fstart[sp], p, j.sc.fcnt[sp], 0);
+}
+
+// the entry of node `kn` for the key at [ks, ks+kl) (escaped when esc), 0 for none
+fn find_key(doc: text, kn: i64, ks: i64, kl: i64, esc: i64) -> i64 {
+    var e = j.f.nfirst[kn];
+    if esc != 0 {
+        decode_string(doc, ks - 1, ks + kl + 1);
+        let n = len(j.tmp);
+        while e != 0 {
+            if j.f.ekind[e] == 0 && j.f.eb[e] == n && substr(j.tmp, 0, n) == substr(j.f.keys, j.f.ea[e], n) { return e; }
+            e = j.f.enext[e];
+        }
+        return 0;
+    }
+    let first = byte_at(doc, ks);
+    while e != 0 {
+        if j.f.ekind[e] == 0 && j.f.eb[e] == kl && j.f.ef[e] == first && substr(doc, ks, kl) == substr(j.f.keys, j.f.ea[e], kl) { return e; }
+        e = j.f.enext[e];
+    }
+    return 0;
+}
+
+// the whole document: 0, or 1 with j.err set
+fn scan(doc: text, filter: text) -> i64 {
+    var p = skip_ws(doc, 0);
+    if p >= len(doc) { return 0; }
+    j.sc.ugen = 1;
+    var node = 0;
+    var mode = 0;                 // 0 a value starts here, 1 a value ended, 2 a key starts here
+    while true {
+        if mode == 0 {
+            p = skip_ws(doc, p);
+            let c = byte_at(doc, p);
+            if c == 123 || c == 91 {
+                let sp = j.sc.sp + 1;
+                if sp > 10000 { return fail_at("exceeds depth limit for parsing", p); }
+                var tag = 6;
+                if c == 123 { tag = 7; }
+                if node >= 0 {
+                    if index_error(node, tag, p) != 0 { return 1; }
+                }
+                j.sc.sp = sp;
+                j.sc.fnode[sp] = node;
+                j.sc.fkind[sp] = tag;
+                j.sc.fcnt[sp] = 0;
+                j.sc.fstart[sp] = p;
+                j.sc.fseen[sp] = 0;
+                p = skip_ws(doc, p + 1);
+                let d = byte_at(doc, p);
+                if tag == 7 {
+                    if d == 125 {
+                        p += 1;
+                        if close_frame(doc, filter, p) != 0 { return 1; }
+                        mode = 1;
+                    } else { mode = 2; }
+                } else {
+                    if d == 93 {
+                        p += 1;
+                        if close_frame(doc, filter, p) != 0 { return 1; }
+                        mode = 1;
+                    } else {
+                        j.sc.fcnt[sp] = 1;
+                        node = elem_node(node, 0);
+                    }
+                }
+            } else {
+                var tag = 0;
+                var e = 0;
+                var esc = 0;
+                if c == 34 {
+                    e = scan_string(doc, p);
+                    tag = 5;
+                    esc = j.sc.esc;
+                } else if c == 45 || is_digit(c) {
+                    e = scan_number(doc, p);
+                    tag = 4;
+                } else if c == 116 || c == 102 || c == 110 {
+                    e = scan_literal(doc, p);
+                    tag = j.sc.esc;
+                } else {
+                    return fail_at("unexpected character, expected a value", p);
+                }
+                if e < 0 { return 1; }
+                if node >= 0 {
+                    if index_error(node, tag, p) != 0 { return 1; }
+                }
+                if value_done(doc, filter, node, tag, p, e, 0, esc) != 0 { return 1; }
+                p = e;
+                mode = 1;
+            }
+        } else if mode == 2 {
+            // a key
+            let sp = j.sc.sp;
+            if byte_at(doc, p) != 34 { return fail_at("object keys must be strings", p); }
+            let e = scan_string(doc, p);
+            if e < 0 { return 1; }
+            let esc = j.sc.esc;
+            let kn = j.sc.fnode[sp];
+            j.sc.fcnt[sp] += 1;
+            node = -1;
+            if kn >= 0 && j.f.nkeys[kn] != 0 {
+                let ent = find_key(doc, kn, p + 1, e - p - 2, esc);
+                if ent != 0 {
+                    node = j.f.enode[ent];
+                    let bit = 1 << (ent - 1);
+                    if (j.sc.fseen[sp] & bit) != 0 {
+                        if j.f.stream[node] != 0 { return fail_at("a key repeats on a streamed path (jq keeps the last one)", p); }
+                        forget_below(node);
+                    }
+                    j.sc.fseen[sp] = j.sc.fseen[sp] | bit;
+                }
+            }
+            p = skip_ws(doc, e);
+            if byte_at(doc, p) != 58 { return fail_at("expected a colon after the key", p); }
+            p += 1;
+            mode = 0;
+        } else {
+            // a value ended
+            if j.sc.exit_depth > 0 && j.sc.sp < j.sc.exit_depth { break; }
+            let sp = j.sc.sp;
+            p = skip_ws(doc, p);
+            if sp == 0 {
+                if p < len(doc) { return fail_at("more than one JSON value on the input (jx reads one document)", p); }
+                break;
+            }
+            let c = byte_at(doc, p);
+            let kind = j.sc.fkind[sp];
+            if c == 44 {
+                if kind == 7 {
+                    p = skip_ws(doc, p + 1);
+                    mode = 2;
+                } else {
+                    j.sc.fcnt[sp] += 1;
+                    node = elem_node(j.sc.fnode[sp], j.sc.fcnt[sp] - 1);
+                    p += 1;
+                    mode = 0;
+                }
+            } else if (c == 125 && kind == 7) || (c == 93 && kind == 6) {
+                p += 1;
+                if close_frame(doc, filter, p) != 0 { return 1; }
+            } else if c < 0 {
+                return fail_at("unfinished JSON term", p);
+            } else {
+                return fail_at("expected a separator or the end of the container", p);
+            }
+        }
+    }
+    if j.f.nunit < 0 { return run_program(doc, filter); }
+    return 0;
+}

@@ -1,0 +1,41 @@
+// Small helpers shared by the scanner, the filter compiler and the output.
+// Bytes are compared as numbers: space 32, tab 9, newline 10, carriage return 13, quote 34, comma 44, colon 58,
+// [ 91, ] 93, { 123, } 125, backslash 92.
+
+fn at(t: text, i: i64) -> i64 {
+    return byte_at(t, i);
+}
+
+fn skip_ws(t: text, p: i64) -> i64 {
+    var i = p;
+    while true {
+        let c = byte_at(t, i);
+        if c != 32 && c != 10 && c != 13 && c != 9 { return i; }
+        i += 1;
+    }
+    return i;
+}
+
+// the value of the hex digit c, or -1
+fn hexval(c: i64) -> i64 {
+    if c >= 48 && c <= 57 { return c - 48; }
+    if c >= 97 && c <= 102 { return c - 87; }
+    if c >= 65 && c <= 70 { return c - 55; }
+    return -1;
+}
+
+// the value of the four hex digits at p, or -1
+fn hex4(t: text, p: i64) -> i64 {
+    let a = hexval(byte_at(t, p));
+    let b = hexval(byte_at(t, p + 1));
+    let c = hexval(byte_at(t, p + 2));
+    let d = hexval(byte_at(t, p + 3));
+    if a < 0 || b < 0 || c < 0 || d < 0 { return -1; }
+    return a * 4096 + b * 256 + c * 16 + d;
+}
+
+// an error: the message and where, for the caller to return
+fn fail_at(msg: text, p: i64) -> i64 {
+    j.err = "jx: " + msg + " (at byte " + str(p) + ")";
+    return -1;
+}
