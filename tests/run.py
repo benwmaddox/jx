@@ -61,7 +61,10 @@ def xdiff_reason(cid):
 def norm(b): return b.replace(b"\r\n", b"\n")
 def run(exe, flags, filt, doc):
     with open("%s/docs/%s.json" % (T, doc), "rb") as f:
-        p = subprocess.run([exe] + flags + [filt], stdin=f, capture_output=True)
+        try:
+            p = subprocess.run([exe] + flags + [filt], stdin=f, capture_output=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            return -9, b"", b"timeout"
     return p.returncode, p.stdout, p.stderr
 
 def early_exit_tail(doc, filt):

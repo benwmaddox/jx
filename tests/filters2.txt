@@ -309,9 +309,10 @@ range(3) | . * 2
 [.users[] | .age] | map(. + 1)
 last(.users[] | .n)
 nth(1; .users[] | .n)
-[.users[] | .age | until(. > 100; . * 2)]
 (.users[] | .age) as $a | $a
 [.[] | try error("x") catch .]
 .users[0] | try .n.q catch "E"
 [.users[] | .tags[]?]
 .users[] | .addr.city?
+
+[.users[] | .age + 1 | until(. > 100; . * 2)]
