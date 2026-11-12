@@ -21,83 +21,83 @@ struct Num {
 }
 
 fn num_init() {
-    if j.num.ready { return; }
+    if jj.num.ready { return; }
     var x = 1.0;
     var k = 0;
     while k < 23 {
-        j.num.p10[k] = x;
+        jj.num.p10[k] = x;
         x = x * 10.0;
         k += 1;
     }
-    j.num.maxd = 9007199254740991.0 * pow2(971);
-    j.num.ready = true;
+    jj.num.maxd = 9007199254740991.0 * pow2(971);
+    jj.num.ready = true;
 }
 
 // ---- big integers: number k lives in bn[k*200 ..], bl[k] limbs ----
 
 fn bn_set(k: i64, v: i64) {
-    j.num.bn[k * 200] = v & 4294967295;
-    j.num.bn[k * 200 + 1] = v >>> 32;
+    jj.num.bn[k * 200] = v & 4294967295;
+    jj.num.bn[k * 200 + 1] = v >>> 32;
     var n = 2;
-    while n > 0 && j.num.bn[k * 200 + n - 1] == 0 { n -= 1; }
-    j.num.bl[k] = n;
+    while n > 0 && jj.num.bn[k * 200 + n - 1] == 0 { n -= 1; }
+    jj.num.bl[k] = n;
 }
 
 fn bn_mul_add(k: i64, m: i64, add: i64) {
     var carry = add;
     var i = 0;
-    let n = j.num.bl[k];
+    let n = jj.num.bl[k];
     while i < n {
-        let v = j.num.bn[k * 200 + i] * m + carry;
-        j.num.bn[k * 200 + i] = v & 4294967295;
+        let v = jj.num.bn[k * 200 + i] * m + carry;
+        jj.num.bn[k * 200 + i] = v & 4294967295;
         carry = v >>> 32;
         i += 1;
     }
     if carry != 0 {
-        j.num.bn[k * 200 + n] = carry;
-        j.num.bl[k] = n + 1;
+        jj.num.bn[k * 200 + n] = carry;
+        jj.num.bl[k] = n + 1;
     }
 }
 
 fn bn_shl(k: i64, bits: i64) {
     let words = bits / 32;
     let r = bits % 32;
-    let n = j.num.bl[k];
+    let n = jj.num.bl[k];
     if n == 0 { return; }
     var i = n - 1;
-    j.num.bn[k * 200 + n + words] = 0;
+    jj.num.bn[k * 200 + n + words] = 0;
     if r == 0 {
-        while i >= 0 { j.num.bn[k * 200 + i + words] = j.num.bn[k * 200 + i]; i -= 1; }
+        while i >= 0 { jj.num.bn[k * 200 + i + words] = jj.num.bn[k * 200 + i]; i -= 1; }
     } else {
         while i >= 0 {
-            let v = j.num.bn[k * 200 + i] << r;
-            j.num.bn[k * 200 + i + words + 1] = j.num.bn[k * 200 + i + words + 1] | (v >>> 32);
-            j.num.bn[k * 200 + i + words] = v & 4294967295;
+            let v = jj.num.bn[k * 200 + i] << r;
+            jj.num.bn[k * 200 + i + words + 1] = jj.num.bn[k * 200 + i + words + 1] | (v >>> 32);
+            jj.num.bn[k * 200 + i + words] = v & 4294967295;
             i -= 1;
         }
     }
     i = 0;
-    while i < words { j.num.bn[k * 200 + i] = 0; i += 1; }
+    while i < words { jj.num.bn[k * 200 + i] = 0; i += 1; }
     var m = n + words + 1;
-    while m > 0 && j.num.bn[k * 200 + m - 1] == 0 { m -= 1; }
-    j.num.bl[k] = m;
+    while m > 0 && jj.num.bn[k * 200 + m - 1] == 0 { m -= 1; }
+    jj.num.bl[k] = m;
 }
 
 fn bn_copy(dst: i64, src: i64) {
-    let n = j.num.bl[src];
+    let n = jj.num.bl[src];
     var i = 0;
-    while i < n { j.num.bn[dst * 200 + i] = j.num.bn[src * 200 + i]; i += 1; }
-    j.num.bl[dst] = n;
+    while i < n { jj.num.bn[dst * 200 + i] = jj.num.bn[src * 200 + i]; i += 1; }
+    jj.num.bl[dst] = n;
 }
 
 fn bn_cmp(x: i64, y: i64) -> i64 {
-    let nx = j.num.bl[x];
-    let ny = j.num.bl[y];
+    let nx = jj.num.bl[x];
+    let ny = jj.num.bl[y];
     if nx != ny { if nx < ny { return -1; } return 1; }
     var i = nx - 1;
     while i >= 0 {
-        let a = j.num.bn[x * 200 + i];
-        let b = j.num.bn[y * 200 + i];
+        let a = jj.num.bn[x * 200 + i];
+        let b = jj.num.bn[y * 200 + i];
         if a != b { if a < b { return -1; } return 1; }
         i -= 1;
     }
@@ -108,46 +108,46 @@ fn bn_cmp(x: i64, y: i64) -> i64 {
 fn bn_sub(x: i64, y: i64) {
     var borrow = 0;
     var i = 0;
-    let nx = j.num.bl[x];
-    let ny = j.num.bl[y];
+    let nx = jj.num.bl[x];
+    let ny = jj.num.bl[y];
     while i < nx {
-        var v = j.num.bn[x * 200 + i] - borrow;
-        if i < ny { v -= j.num.bn[y * 200 + i]; }
+        var v = jj.num.bn[x * 200 + i] - borrow;
+        if i < ny { v -= jj.num.bn[y * 200 + i]; }
         if v < 0 { v += 4294967296; borrow = 1; } else { borrow = 0; }
-        j.num.bn[x * 200 + i] = v;
+        jj.num.bn[x * 200 + i] = v;
         i += 1;
     }
     var m = nx;
-    while m > 0 && j.num.bn[x * 200 + m - 1] == 0 { m -= 1; }
-    j.num.bl[x] = m;
+    while m > 0 && jj.num.bn[x * 200 + m - 1] == 0 { m -= 1; }
+    jj.num.bl[x] = m;
 }
 
 fn bn_bitlen(k: i64) -> i64 {
-    let n = j.num.bl[k];
+    let n = jj.num.bl[k];
     if n == 0 { return 0; }
-    var top = j.num.bn[k * 200 + n - 1];
+    var top = jj.num.bn[k * 200 + n - 1];
     var b = 0;
     while top != 0 { top = top >>> 1; b += 1; }
     return (n - 1) * 32 + b;
 }
 
-// the top `want` bits of the number (which has at least that many), and whether any lower bit is set (in j.num.ddn)
+// the top `want` bits of the number (which has at least that many), and whether any lower bit is set (in jj.num.ddn)
 fn bn_top(k: i64, want: i64) -> i64 {
     let bl = bn_bitlen(k);
     let drop = bl - want;
     var q = 0;
     var i = bl - 1;
     while i >= drop {
-        let bit = (j.num.bn[k * 200 + i / 32] >>> (i % 32)) & 1;
+        let bit = (jj.num.bn[k * 200 + i / 32] >>> (i % 32)) & 1;
         q = (q << 1) | bit;
         i -= 1;
     }
     var sticky = 0;
     while i >= 0 {
-        if ((j.num.bn[k * 200 + i / 32] >>> (i % 32)) & 1) != 0 { sticky = 1; break; }
+        if ((jj.num.bn[k * 200 + i / 32] >>> (i % 32)) & 1) != 0 { sticky = 1; break; }
         i -= 1;
     }
-    j.num.ddn = sticky;
+    jj.num.ddn = sticky;
     return q;
 }
 
@@ -213,13 +213,35 @@ fn num_parse(t: text, a: i64, b: i64) -> f64 {
         let d = c - 48;
         if seen_dot { frac += 1; }
         if nd == 0 && d == 0 { i += 1; continue; }
-        if nd < 1000 { j.num.dg[nd] = d; nd += 1; }
+        if nd < 1000 { jj.num.dg[nd] = d; nd += 1; }
         else { dropped += 1; if d != 0 { sticky = 1; } }
         i += 1;
     }
     var q = ex - frac + dropped;
+    // jq 1.8 first rounds the literal to 17 significant digits (decNumberReduce, half even), then converts that
+    if nd > 17 {
+        var up = false;
+        if jj.num.dg[17] > 5 { up = true; }
+        else if jj.num.dg[17] == 5 {
+            var rest = sticky != 0;
+            var r = 18;
+            while r < nd && !rest { if jj.num.dg[r] != 0 { rest = true; } r += 1; }
+            if rest { up = true; } else if (jj.num.dg[16] % 2) == 1 { up = true; }
+        }
+        q += nd - 17;
+        nd = 17;
+        sticky = 0;
+        if up {
+            var c = 16;
+            while c >= 0 {
+                if jj.num.dg[c] == 9 { jj.num.dg[c] = 0; c -= 1; }
+                else { jj.num.dg[c] += 1; break; }
+            }
+            if c < 0 { jj.num.dg[0] = 1; q += 1; }
+        }
+    }
     if sticky == 0 {
-        while nd > 0 && j.num.dg[nd - 1] == 0 { nd -= 1; q += 1; }
+        while nd > 0 && jj.num.dg[nd - 1] == 0 { nd -= 1; q += 1; }
     }
     var x = 0.0;
     if nd == 0 {
@@ -231,9 +253,9 @@ fn num_parse(t: text, a: i64, b: i64) -> f64 {
     } else if nd <= 15 && q >= -22 && q <= 22 {
         var w = 0;
         var k = 0;
-        while k < nd { w = w * 10 + j.num.dg[k]; k += 1; }
+        while k < nd { w = w * 10 + jj.num.dg[k]; k += 1; }
         x = w as f64;
-        if q > 0 { x = x * j.num.p10[q]; } else if q < 0 { x = x / j.num.p10[-q]; }
+        if q > 0 { x = x * jj.num.p10[q]; } else if q < 0 { x = x / jj.num.p10[-q]; }
     } else {
         // exact: D * 10^q with D the digits as a big integer
         var k = 0;
@@ -242,7 +264,7 @@ fn num_parse(t: text, a: i64, b: i64) -> f64 {
             // nine digits at a time
             var chunk = 0;
             var m = 0;
-            while m < 9 && k < nd { chunk = chunk * 10 + j.num.dg[k]; m += 1; k += 1; }
+            while m < 9 && k < nd { chunk = chunk * 10 + jj.num.dg[k]; m += 1; k += 1; }
             var mul = 1;
             var z = 0;
             while z < m { mul = mul * 10; z += 1; }
@@ -265,7 +287,7 @@ fn num_parse(t: text, a: i64, b: i64) -> f64 {
                 x = round_dbl(bn_top(0, nb) << (62 - nb), nb - 62, 0);
             } else {
                 let top = bn_top(0, 62);
-                x = round_dbl(top, nb - 62, j.num.ddn);
+                x = round_dbl(top, nb - 62, jj.num.ddn);
             }
         } else {
             // D / 10^-q: scale D so the quotient has 56 to 58 bits
@@ -295,7 +317,7 @@ fn num_parse(t: text, a: i64, b: i64) -> f64 {
                 bit -= 1;
             }
             var st = 0;
-            if j.num.bl[0] != 0 { st = 1; }
+            if jj.num.bl[0] != 0 { st = 1; }
             x = round_dbl(quo, -sh, st);
         }
     }
@@ -305,7 +327,7 @@ fn num_parse(t: text, a: i64, b: i64) -> f64 {
 
 // ---- printing ----
 
-// splits str(|x|) (x finite, not zero) into digits j.num.dd[0 .. ddn) and the decimal point position j.num.ddpt:
+// splits str(|x|) (x finite, not zero) into digits jj.num.dd[0 .. ddn) and the decimal point position jj.num.ddpt:
 // the value is 0.d1d2d3... * 10^ddpt
 fn dbl_digits(x: f64) {
     let s = str(x);
@@ -330,36 +352,36 @@ fn dbl_digits(x: f64) {
         }
         let d = c - 48;
         cnt += 1;
-        if nd == 0 && d == 0 { z += 1; } else { j.num.dd[nd] = d; nd += 1; }
+        if nd == 0 && d == 0 { z += 1; } else { jj.num.dd[nd] = d; nd += 1; }
         i += 1;
     }
     if pt < 0 { pt = cnt; }
-    while nd > 1 && j.num.dd[nd - 1] == 0 { nd -= 1; }
-    j.num.ddn = nd;
-    j.num.ddpt = pt - z + ex;
+    while nd > 1 && jj.num.dd[nd - 1] == 0 { nd -= 1; }
+    jj.num.ddn = nd;
+    jj.num.ddpt = pt - z + ex;
 }
 
 
 // bn_divmod10: the number k divided by 10 in place, its remainder returned
 fn bn_divmod10(k: i64) -> i64 {
     var rem = 0;
-    var i = j.num.bl[k] - 1;
+    var i = jj.num.bl[k] - 1;
     while i >= 0 {
-        let v = rem * 4294967296 + j.num.bn[k * 200 + i];
-        j.num.bn[k * 200 + i] = v / 10;
+        let v = rem * 4294967296 + jj.num.bn[k * 200 + i];
+        jj.num.bn[k * 200 + i] = v / 10;
         rem = v % 10;
         i -= 1;
     }
-    var m = j.num.bl[k];
-    while m > 0 && j.num.bn[k * 200 + m - 1] == 0 { m -= 1; }
-    j.num.bl[k] = m;
+    var m = jj.num.bl[k];
+    while m > 0 && jj.num.bn[k * 200 + m - 1] == 0 { m -= 1; }
+    jj.num.bl[k] = m;
     return rem;
 }
 
 // str() rounds an exact tie between two shortest digit strings up; dtoa (and so jq) takes the even one. Looks at the exact
-// decimal value of x when it has few fractional bits and fixes the last digit in j.num.dd.
+// decimal value of x when it has few fractional bits and fixes the last digit in jj.num.dd.
 fn fix_tie(x: f64) {
-    let n = j.num.ddn;
+    let n = jj.num.ddn;
     if n < 15 { return; }
     var y = x;
     var f = 0;
@@ -369,65 +391,65 @@ fn fix_tie(x: f64) {
     var z = 0;
     while z < f { bn_mul_add(3, 5, 0); z += 1; }
     var len = 0;
-    while j.num.bl[3] > 0 && len < 78 { j.num.ex[len] = bn_divmod10(3); len += 1; }
+    while jj.num.bl[3] > 0 && len < 78 { jj.num.ex[len] = bn_divmod10(3); len += 1; }
     // digits are in reverse order: ex[len-1] is the first
     var lo = 0;
-    while lo < len && j.num.ex[lo] == 0 { lo += 1; }
+    while lo < len && jj.num.ex[lo] == 0 { lo += 1; }
     let cnt = len - lo;                      // significant digits of the exact value
     if cnt != n + 1 { return; }
-    if len - f != j.num.ddpt { return; }
-    if j.num.ex[lo] != 5 { return; }
+    if len - f != jj.num.ddpt { return; }
+    if jj.num.ex[lo] != 5 { return; }
     var i = 0;
     while i < n - 1 {
-        if j.num.ex[len - 1 - i] != j.num.dd[i] { return; }
+        if jj.num.ex[len - 1 - i] != jj.num.dd[i] { return; }
         i += 1;
     }
-    let lower = j.num.ex[len - 1 - (n - 1)];
-    if j.num.dd[n - 1] != lower + 1 { return; }
-    if lower % 2 == 0 { j.num.dd[n - 1] = lower; }
+    let lower = jj.num.ex[len - 1 - (n - 1)];
+    if jj.num.dd[n - 1] != lower + 1 { return; }
+    if lower % 2 == 0 { jj.num.dd[n - 1] = lower; }
 }
 
-// the text jq prints for the double x, in j.num.buf
+// the text jq prints for the double x, in jj.num.buf
 fn fmt_dbl(x0: f64) {
     num_init();
     var x = x0;
-    j.num.buf = "";
-    if x != x { j.num.buf += "null"; return; }
+    jj.num.buf = "";
+    if x != x { jj.num.buf += "null"; return; }
     if x == 0.0 {
-        if 1.0 / x < 0.0 { j.num.buf += "-0"; } else { j.num.buf += "0"; }
+        if 1.0 / x < 0.0 { jj.num.buf += "-0"; } else { jj.num.buf += "0"; }
         return;
     }
-    if x < 0.0 { j.num.buf += "-"; x = -x; }
-    if x > j.num.maxd { x = j.num.maxd; }
+    if x < 0.0 { jj.num.buf += "-"; x = -x; }
+    if x > jj.num.maxd { x = jj.num.maxd; }
     dbl_digits(x);
     fix_tie(x);
-    let n = j.num.ddn;
-    let pt = j.num.ddpt;
+    let n = jj.num.ddn;
+    let pt = jj.num.ddpt;
     var k = 0;
     if pt <= -4 || pt > n + 15 {
-        j.num.buf += chr(48 + j.num.dd[0]);
+        jj.num.buf += chr(48 + jj.num.dd[0]);
         if n > 1 {
-            j.num.buf += ".";
+            jj.num.buf += ".";
             k = 1;
-            while k < n { j.num.buf += chr(48 + j.num.dd[k]); k += 1; }
+            while k < n { jj.num.buf += chr(48 + jj.num.dd[k]); k += 1; }
         }
         var e = pt - 1;
-        j.num.buf += "e";
-        if e < 0 { j.num.buf += "-"; e = -e; } else { j.num.buf += "+"; }
-        if e < 10 { j.num.buf += "0"; }
-        j.num.buf += str(e);
+        jj.num.buf += "e";
+        if e < 0 { jj.num.buf += "-"; e = -e; } else { jj.num.buf += "+"; }
+        if e < 10 { jj.num.buf += "0"; }
+        jj.num.buf += str(e);
     } else if pt <= 0 {
-        j.num.buf += "0.";
+        jj.num.buf += "0.";
         k = pt;
-        while k < 0 { j.num.buf += "0"; k += 1; }
+        while k < 0 { jj.num.buf += "0"; k += 1; }
         k = 0;
-        while k < n { j.num.buf += chr(48 + j.num.dd[k]); k += 1; }
+        while k < n { jj.num.buf += chr(48 + jj.num.dd[k]); k += 1; }
     } else if pt >= n {
-        while k < n { j.num.buf += chr(48 + j.num.dd[k]); k += 1; }
-        while k < pt { j.num.buf += "0"; k += 1; }
+        while k < n { jj.num.buf += chr(48 + jj.num.dd[k]); k += 1; }
+        while k < pt { jj.num.buf += "0"; k += 1; }
     } else {
-        while k < pt { j.num.buf += chr(48 + j.num.dd[k]); k += 1; }
-        j.num.buf += ".";
-        while k < n { j.num.buf += chr(48 + j.num.dd[k]); k += 1; }
+        while k < pt { jj.num.buf += chr(48 + jj.num.dd[k]); k += 1; }
+        jj.num.buf += ".";
+        while k < n { jj.num.buf += chr(48 + jj.num.dd[k]); k += 1; }
     }
 }

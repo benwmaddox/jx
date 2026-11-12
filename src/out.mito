@@ -1,43 +1,61 @@
-// Writing values the way jq 1.8.2 does: strings re-escaped, numbers in decNumber's form (1e3 becomes 1E+3, 0.0001e5 becomes 1E+1),
-// containers compact or indented. A value is a span of the (already validated) input.
-
-fn begin_result() {
-    if j.o.sep { j.o.text += "\n"; }
-    j.o.sep = true;
-    j.o.results += 1;
-}
+// Writing values the way jq 1.8.2 does: strings re-escaped, invalid UTF-8 replaced by U+FFFD, numbers in decNumber's form
+// (1e3 becomes 1E+3, 0.0001e5 becomes 1E+1) or as jq prints a double, containers compact or indented.
 
 fn newline_indent(depth: i64) {
-    j.o.text += "\n";
+    jj.o.text += "\n";
     var k = 0;
-    while k < depth { j.o.text += "  "; k += 1; }
+    while k < depth { jj.o.text += "  "; k += 1; }
 }
 
-// append the code point or byte run to the destination: the output (to_out) or the scratch string
-fn emit_run(doc: text, s: i64, n: i64, to_out: bool) {
+// write t to the output, or to the scratch string while a number is being turned into a string
+fn ow(t: text) {
+    if jj.o.to == 0 { jj.o.text += t; } else { jj.ev.scr += t; }
+}
+
+// append the byte run to a destination (see put in eval.mito)
+fn emit_run(doc: text, s: i64, n: i64, dst: i64) {
     if n <= 0 { return; }
-    if to_out { j.o.text += substr(doc, s, n); } else { j.tmp += substr(doc, s, n); }
+    put(dst, substr(doc, s, n));
 }
 
-fn emit_text(t: text, to_out: bool) {
-    if to_out { j.o.text += t; } else { j.tmp += t; }
+// the length of the UTF-8 sequence at i (before end) as jq's decoder reads it: n > 0 for a valid one, -n for an invalid one that
+// is replaced by one U+FFFD and consumes n bytes
+fn utf8_len(doc: text, i: i64, end: i64) -> i64 {
+    let c = byte_at(doc, i);
+    if c < 128 { return 1; }
+    if c < 194 { return -1; }
+    var need = 4;
+    if c < 224 { need = 2; } else if c < 240 { need = 3; } else if c > 244 { return -1; }
+    var k = 1;
+    while k < need {
+        var b = -1;
+        if i + k < end { b = byte_at(doc, i + k); }
+        if b < 128 || b > 191 { return -k; }
+        k += 1;
+    }
+    let b1 = byte_at(doc, i + 1);
+    if c == 224 && b1 < 160 { return -need; }
+    if c == 237 && b1 >= 160 { return -need; }
+    if c == 240 && b1 < 144 { return -need; }
+    if c == 244 && b1 >= 144 { return -need; }
+    return need;
 }
 
-// the code point of the escape at i (a backslash): the character, with j.sc.esc left as the length of the escape
+// the code point of the escape at i (a backslash): the character, with jj.sc.esc left as the length of the escape
 fn escape_cp(doc: text, i: i64) -> i64 {
     let d = byte_at(doc, i + 1);
     if d == 117 {
         let h = hex4(doc, i + 2);
         if h >= 55296 && h <= 56319 {
             let l = hex4(doc, i + 8);
-            j.sc.esc = 12;
+            jj.sc.esc = 12;
             return 65536 + ((h - 55296) << 10) + (l - 56320);
         }
-        j.sc.esc = 6;
+        jj.sc.esc = 6;
         if h >= 56320 && h <= 57343 { return 65533; }
         return h;
     }
-    j.sc.esc = 2;
+    jj.sc.esc = 2;
     if d == 110 { return 10; }
     if d == 116 { return 9; }
     if d == 114 { return 13; }
@@ -46,62 +64,102 @@ fn escape_cp(doc: text, i: i64) -> i64 {
     return d;                      // " \ /
 }
 
-// the string at [a, b) (with its quotes), unescaped, into the scratch string or the output
-fn decode_to(doc: text, a: i64, b: i64, to_out: bool) {
-    var i = a + 1;
-    let end = b - 1;
-    var rs = i;
-    while i < end {
-        if byte_at(doc, i) != 92 { i += 1; continue; }
-        emit_run(doc, rs, i - rs, to_out);
-        let cp = escape_cp(doc, i);
-        if cp == 0 { emit_text("\0", to_out); } else { emit_text(chr(cp), to_out); }
-        i += j.sc.esc;
-        rs = i;
-    }
-    emit_run(doc, rs, i - rs, to_out);
-}
-
-fn decode_string(doc: text, a: i64, b: i64) {
-    j.tmp = "";
-    decode_to(doc, a, b, false);
-}
-
-// the string at [a, b) as jq writes it: escapes normalized
-fn write_string_norm(doc: text, a: i64, b: i64) {
-    j.o.text += "\"";
+// the string at [a, b) (with its quotes), unescaped and with invalid UTF-8 replaced, into a destination
+fn decode_to(doc: text, a: i64, b: i64, dst: i64) {
     var i = a + 1;
     let end = b - 1;
     var rs = i;
     while i < end {
         let c = byte_at(doc, i);
-        if c != 92 && c != 127 { i += 1; continue; }
-        emit_run(doc, rs, i - rs, true);
+        if c < 128 && c != 92 { i += 1; continue; }
+        if c >= 128 {
+            let n = utf8_len(doc, i, end);
+            if n > 0 { i += n; continue; }
+            emit_run(doc, rs, i - rs, dst);
+            put(dst, chr(65533));
+            i += -n;
+            rs = i;
+            continue;
+        }
+        emit_run(doc, rs, i - rs, dst);
+        let cp = escape_cp(doc, i);
+        if cp == 0 { put(dst, "\0"); } else { put(dst, chr(cp)); }
+        i += jj.sc.esc;
+        rs = i;
+    }
+    emit_run(doc, rs, i - rs, dst);
+}
+
+fn decode_string(doc: text, a: i64, b: i64) {
+    jj.tmp = "";
+    decode_to(doc, a, b, 0);
+}
+
+fn write_cp_escaped(cp: i64) {
+    if cp == 34 { jj.o.text += "\\\""; }
+    else if cp == 92 { jj.o.text += "\\\\"; }
+    else if cp == 10 { jj.o.text += "\\n"; }
+    else if cp == 9 { jj.o.text += "\\t"; }
+    else if cp == 13 { jj.o.text += "\\r"; }
+    else if cp == 8 { jj.o.text += "\\b"; }
+    else if cp == 12 { jj.o.text += "\\f"; }
+    else if cp < 32 || cp == 127 {
+        jj.o.text += "\\u00";
+        jj.o.text += substr("0123456789abcdef", cp / 16, 1);
+        jj.o.text += substr("0123456789abcdef", cp % 16, 1);
+    }
+    else { jj.o.text += chr(cp); }
+}
+
+// the string at [a, b) (with its quotes) as jq writes it: escapes normalized, invalid UTF-8 replaced
+fn write_string_norm(doc: text, a: i64, b: i64) {
+    jj.o.text += "\"";
+    var i = a + 1;
+    let end = b - 1;
+    var rs = i;
+    while i < end {
+        let c = byte_at(doc, i);
+        if c < 127 && c != 92 { i += 1; continue; }
+        if c >= 128 {
+            let n = utf8_len(doc, i, end);
+            if n > 0 { i += n; continue; }
+            emit_run(doc, rs, i - rs, 1);
+            jj.o.text += chr(65533);
+            i += -n;
+            rs = i;
+            continue;
+        }
+        emit_run(doc, rs, i - rs, 1);
         if c == 127 {
-            j.o.text += "\\u007f";
+            jj.o.text += "\\u007f";
             i += 1;
         } else {
             let cp = escape_cp(doc, i);
-            i += j.sc.esc;
-            if cp == 34 { j.o.text += "\\\""; }
-            else if cp == 92 { j.o.text += "\\\\"; }
-            else if cp == 10 { j.o.text += "\\n"; }
-            else if cp == 9 { j.o.text += "\\t"; }
-            else if cp == 13 { j.o.text += "\\r"; }
-            else if cp == 8 { j.o.text += "\\b"; }
-            else if cp == 12 { j.o.text += "\\f"; }
-            else if cp < 32 || cp == 127 {
-                j.o.text += "\\u00";
-                j.o.text += substr("0123456789abcdef", cp / 16, 1);
-                j.o.text += substr("0123456789abcdef", cp % 16, 1);
-            }
-            else if cp == 0 { j.o.text += "\\u0000"; }
-            else { j.o.text += chr(cp); }
+            i += jj.sc.esc;
+            write_cp_escaped(cp);
         }
         rs = i;
     }
-    emit_run(doc, rs, i - rs, true);
-    j.o.text += "\"";
+    emit_run(doc, rs, i - rs, 1);
+    jj.o.text += "\"";
+}
+
+// plain bytes (already valid UTF-8) of t at [o, o+n) as a JSON string
+fn write_plain(t: text, o: i64, n: i64) {
+    jj.o.text += "\"";
+    var i = o;
+    let end = o + n;
+    var rs = o;
+    while i < end {
+        let c = byte_at(t, i);
+        if c >= 32 && c != 34 && c != 92 && c != 127 { i += 1; continue; }
+        if i > rs { jj.o.text += substr(t, rs, i - rs); }
+        write_cp_escaped(c);
+        i += 1;
+        rs = i;
+    }
+    if i > rs { jj.o.text += substr(t, rs, i - rs); }
+    jj.o.text += "\"";
 }
 
 // digits [x, y) of the virtual digit string (integer digits at is, then fraction digits at fs)
@@ -109,17 +167,17 @@ fn emit_digits(doc: text, is: i64, ilen: i64, fs: i64, x: i64, y: i64) {
     if x < ilen {
         var ye = y;
         if ye > ilen { ye = ilen; }
-        if ye > x { j.o.text += substr(doc, is + x, ye - x); }
+        if ye > x { ow(substr(doc, is + x, ye - x)); }
     }
     var xf = x;
     if xf < ilen { xf = ilen; }
-    if y > xf { j.o.text += substr(doc, fs + (xf - ilen), y - xf); }
+    if y > xf { ow(substr(doc, fs + (xf - ilen), y - xf)); }
 }
 
-// the number at [a, b) in decNumber's scientific string form; abs drops the minus sign
-fn write_number(doc: text, a: i64, b: i64, abs: bool) {
+// the number at [a, b) in decNumber's scientific string form. mode 0 as written, 1 absolute value, 2 negated
+fn write_number(doc: text, a: i64, b: i64, mode: i64) {
     var i = a;
-    let neg = byte_at(doc, i) == 45;
+    var neg = byte_at(doc, i) == 45;
     if neg { i += 1; }
     let is = i;
     while is_digit(byte_at(doc, i)) { i += 1; }
@@ -148,9 +206,17 @@ fn write_number(doc: text, a: i64, b: i64, abs: bool) {
         }
         if es { ex = -ex; }
     }
-    if neg && !abs { j.o.text += "-"; }
+    // a negated zero is zero
+    var allzero = true;
+    var z = 0;
+    while z < ilen && allzero { if byte_at(doc, is + z) != 48 { allzero = false; } z += 1; }
+    z = 0;
+    while z < flen && allzero { if byte_at(doc, fs + z) != 48 { allzero = false; } z += 1; }
+    if mode == 1 { neg = false; }
+    else if mode == 2 { neg = !neg; if allzero { neg = false; } }
+    if neg { ow("-"); }
     if !more {
-        j.o.text += substr(doc, is, ilen);
+        ow(substr(doc, is, ilen));
         return;
     }
     // the coefficient: the digits without leading zeros; all zero is "0"
@@ -170,60 +236,60 @@ fn write_number(doc: text, a: i64, b: i64, abs: bool) {
         let pointpos = n + e;      // digits before the decimal point
         if pointpos > 0 {
             emit_digits(doc, is, ilen, fs, k, k + pointpos);
-            j.o.text += ".";
+            ow(".");
             emit_digits(doc, is, ilen, fs, k + pointpos, total);
         } else {
-            j.o.text += "0.";
-            var z = pointpos;
-            while z < 0 { j.o.text += "0"; z += 1; }
+            ow("0.");
+            var zz = pointpos;
+            while zz < 0 { ow("0"); zz += 1; }
             emit_digits(doc, is, ilen, fs, k, total);
         }
         return;
     }
     emit_digits(doc, is, ilen, fs, k, k + 1);
     if n > 1 {
-        j.o.text += ".";
+        ow(".");
         emit_digits(doc, is, ilen, fs, k + 1, total);
     }
-    j.o.text += "E";
-    if adj >= 0 { j.o.text += "+"; j.o.text += str(adj); } else { j.o.text += "-"; j.o.text += str(-adj); }
+    ow("E");
+    if adj >= 0 { ow("+"); ow(str(adj)); } else { ow("-"); ow(str(-adj)); }
 }
 
-// a container (validated) at [a, b): tokens re-written compact or indented
-fn write_container(doc: text, a: i64, b: i64) {
+// a container (validated) at [a, b): tokens re-written compact or indented, starting at nesting depth base
+fn write_container(doc: text, a: i64, b: i64, base: i64) {
     var p = a;
-    var depth = 0;
+    var depth = base;
     while p < b {
         let c = byte_at(doc, p);
         if c == 34 {
             let e = scan_string(doc, p);
-            if j.sc.esc != 0 { write_string_norm(doc, p, e); } else { j.o.text += substr(doc, p, e - p); }
+            if jj.sc.esc != 0 { write_string_norm(doc, p, e); } else { jj.o.text += substr(doc, p, e - p); }
             p = e;
         } else if c == 123 || c == 91 {
             let q = skip_ws(doc, p + 1);
             let d = byte_at(doc, q);
             if (c == 123 && d == 125) || (c == 91 && d == 93) {
-                j.o.text += substr(doc, p, 1);
-                j.o.text += substr(doc, q, 1);
+                jj.o.text += substr(doc, p, 1);
+                jj.o.text += substr(doc, q, 1);
                 p = q + 1;
             } else {
-                j.o.text += substr(doc, p, 1);
+                jj.o.text += substr(doc, p, 1);
                 depth += 1;
-                if j.o.pretty { newline_indent(depth); }
+                if jj.o.pretty { newline_indent(depth); }
                 p = q;
             }
         } else if c == 125 || c == 93 {
             depth -= 1;
-            if j.o.pretty { newline_indent(depth); }
-            j.o.text += substr(doc, p, 1);
+            if jj.o.pretty { newline_indent(depth); }
+            jj.o.text += substr(doc, p, 1);
             p += 1;
         } else if c == 44 {
-            j.o.text += ",";
-            if j.o.pretty { newline_indent(depth); }
+            jj.o.text += ",";
+            if jj.o.pretty { newline_indent(depth); }
             p = skip_ws(doc, p + 1);
         } else if c == 58 {
-            j.o.text += ":";
-            if j.o.pretty { j.o.text += " "; }
+            jj.o.text += ":";
+            if jj.o.pretty { jj.o.text += " "; }
             p = skip_ws(doc, p + 1);
         } else if c == 32 || c == 10 || c == 13 || c == 9 {
             p += 1;
@@ -234,26 +300,72 @@ fn write_container(doc: text, a: i64, b: i64) {
                 if d == 44 || d == 125 || d == 93 || d == 32 || d == 10 || d == 13 || d == 9 || d < 0 { break; }
                 e += 1;
             }
-            if c == 45 || is_digit(c) { write_number(doc, p, e, false); } else { j.o.text += substr(doc, p, e - p); }
+            if c == 45 || is_digit(c) { write_number(doc, p, e, 0); } else { jj.o.text += substr(doc, p, e - p); }
             p = e;
         }
     }
 }
 
-// a value of the given tag at [a, b) as a result
-fn write_value(doc: text, tag: i64, a: i64, b: i64, esc: i64) {
-    begin_result();
-    if tag == 5 {
-        if j.o.raw {
-            if esc != 0 { decode_to(doc, a, b, true); } else { j.o.text += substr(doc, a + 1, b - a - 2); }
+// a string entry as a JSON string (or raw)
+fn write_string_h(doc: text, filter: text, h: i64, raw: bool) {
+    let s = jj.v.vs[h];
+    let a = jj.v.va[h];
+    let b = jj.v.vb[h];
+    if s == 0 {
+        if raw {
+            if jj.v.vf[h] != 0 { decode_to(doc, a, b, 1); } else { jj.o.text += substr(doc, a + 1, b - a - 2); }
         } else {
-            if esc != 0 { write_string_norm(doc, a, b); } else { j.o.text += substr(doc, a, b - a); }
+            if jj.v.vf[h] != 0 { write_string_norm(doc, a, b); } else { jj.o.text += substr(doc, a, b - a); }
         }
-    } else if tag == 4 {
-        write_number(doc, a, b, false);
-    } else if tag == 6 || tag == 7 {
-        write_container(doc, a, b);
-    } else {
-        j.o.text += substr(doc, a, b - a);
+        return;
     }
+    if raw {
+        if s == 1 { jj.o.text += substr(jj.f.lits, a, b); }
+        else if s == 2 { jj.o.text += substr(jj.ev.scr, a, b); }
+        else { jj.o.text += substr(jj.ev.ptx, a, b); }
+        return;
+    }
+    if s == 1 { write_plain(jj.f.lits, a, b); }
+    else if s == 2 { write_plain(jj.ev.scr, a, b); }
+    else { write_plain(jj.ev.ptx, a, b); }
+}
+
+// a value entry as a result or inside one, at nesting depth `depth`
+fn write_h(doc: text, filter: text, h: i64, depth: i64) {
+    let t = jj.v.vt[h];
+    if t == 1 { jj.o.text += "null"; return; }
+    if t == 2 { jj.o.text += "false"; return; }
+    if t == 3 { jj.o.text += "true"; return; }
+    if t == 4 {
+        let s = jj.v.vs[h];
+        if s == 4 { jj.o.text += str(jj.v.va[h]); return; }
+        if s == 3 { fmt_dbl(jj.v.vx[h]); jj.o.text += jj.num.buf; return; }
+        var mode = 0;
+        if (jj.v.vf[h] & 2) != 0 { mode = 1; } else if (jj.v.vf[h] & 1) != 0 { mode = 2; }
+        if s == 0 { write_number(doc, jj.v.va[h], jj.v.vb[h], mode); } else { write_number(filter, jj.v.va[h], jj.v.vb[h], mode); }
+        return;
+    }
+    if t == 5 { write_string_h(doc, filter, h, depth == 0 && jj.o.raw); return; }
+    if jj.v.vs[h] == 0 { write_container(doc, jj.v.va[h], jj.v.vb[h], depth); return; }
+    // built
+    var p = jj.v.va[h];
+    if p < 0 { if t == 7 { jj.o.text += "{}"; } else { jj.o.text += "[]"; } return; }
+    if t == 7 { jj.o.text += "{"; } else { jj.o.text += "["; }
+    var first = true;
+    while p >= 0 {
+        if !first { jj.o.text += ","; }
+        first = false;
+        if jj.o.pretty { newline_indent(depth + 1); }
+        if t == 7 {
+            write_string_h(doc, filter, jj.v.va[p], false);
+            jj.o.text += ":";
+            if jj.o.pretty { jj.o.text += " "; }
+            write_h(doc, filter, jj.v.vb[p], depth + 1);
+        } else {
+            write_h(doc, filter, p, depth + 1);
+        }
+        p = jj.v.vn[p];
+    }
+    if jj.o.pretty { newline_indent(depth); }
+    if t == 7 { jj.o.text += "}"; } else { jj.o.text += "]"; }
 }

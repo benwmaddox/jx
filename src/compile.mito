@@ -1,12 +1,30 @@
-// The filter compiler: reads the filter text once and builds (a) a trie of the wanted paths (the path automaton: a node is
-// a value reached by a path, with child entries by key, by index and by `[]`), and (b) the slot program.
-// Stage 1 grammar:   filter := term ( "|" term )*
-//   term := path | select( path [op literal] ) | length
-//   path := ( "." ident | ".\"key\"" | "." ) ( "[" integer "]" | "[]" | "[\"key\"]" )*  ( "." step )*
-// Everything else is rejected here, before any input is read.
+// The filter compiler: reads the filter text once into an expression tree (no ASTs beyond fixed arrays), then analyzes the tree
+// to build (a) a trie of the wanted paths (the path automaton: a node is a value reached by a path, with child entries by key,
+// by index and by `[]`) and (b) scopes: an iteration of a node whose body runs at the end of each element while the document streams by.
+// Grammar (jq's, the supported part):
+//   pipe `|` (right), `,`, `//` (right), `or`, `and`, comparisons (not chained), `+ -`, `* / %`, unary minus, postfix `.k ."k" [n] ["k"] []`,
+//   `.`, literals, `( )`, `[ ]`, `{ }`, `if/elif/else/end`, and the builtins length type keys has not add empty first map select
+//   tostring tonumber floor ceil round sqrt fabs.
+// Everything else is rejected here, before any input is read: exit code 1, `jx: not supported in Stage 2: ...`.
+
+const K {
+    ID: i64 = 1; LIT: i64 = 2; NODE: i64 = 3; FIELD: i64 = 4; IDX: i64 = 5; ITER: i64 = 6; PIPE: i64 = 7; COMMA: i64 = 8;
+    ALT: i64 = 9; BIN: i64 = 10; AND: i64 = 11; OR: i64 = 12; NEG: i64 = 13; IF: i64 = 14; ARR: i64 = 15; OBJ: i64 = 16;
+    FN: i64 = 17; SELECT: i64 = 18; EMPTY: i64 = 19; CMPLIT: i64 = 20; FOLD: i64 = 21; PLAY: i64 = 22;
+}
+
+const F {
+    LENGTH: i64 = 1; TYPE: i64 = 2; KEYS: i64 = 3; HAS: i64 = 4; NOT: i64 = 5; ADD: i64 = 6; TOSTRING: i64 = 7; TONUMBER: i64 = 8;
+    FLOOR: i64 = 9; CEIL: i64 = 10; ROUND: i64 = 11; SQRT: i64 = 12; FABS: i64 = 13;
+}
 
 fn reject(what: text, p: i64) -> i64 {
-    j.err = "jx: not supported in Stage 1: " + what + " (filter position " + str(p) + ")";
+    jj.err = "jx: not supported in Stage 2: " + what + " (filter position " + str(p) + ")";
+    return 1;
+}
+
+fn syntax(what: text, p: i64) -> i64 {
+    jj.err = "jx: syntax error: " + what + " (filter position " + str(p) + ")";
     return 1;
 }
 
@@ -18,63 +36,89 @@ fn is_name_char(c: i64) -> bool {
     return is_name_start(c) || is_digit(c);
 }
 
+fn mk(kind: i64, a: i64, b: i64, c: i64, p: i64) -> i64 {
+    let n = jj.f.nast;
+    if n >= 1023 { jj.err = "jx: the filter is too big (1024 expression nodes)"; return -1; }
+    jj.f.nast = n + 1;
+    jj.f.ak[n] = kind;
+    jj.f.aa[n] = a;
+    jj.f.ab[n] = b;
+    jj.f.ac[n] = c;
+    jj.f.ad[n] = 0;
+    jj.f.nx[n] = -1;
+    jj.f.at[n] = p;
+    return n;
+}
+
+// ---- automaton nodes ----
+
 fn new_node(parent: i64) -> i64 {
-    let n = j.f.nn;
-    j.f.nn = n + 1;
-    j.f.par[n] = parent;
-    j.f.niter[n] = -1;
+    let n = jj.f.nn;
+    jj.f.nn = n + 1;
+    jj.f.par[n] = parent;
+    jj.f.niter[n] = -1;
+    jj.f.sc1[n] = -1;
+    jj.f.owner[n] = -1;
     return n;
 }
 
 fn new_entry(parent: i64, kind: i64) -> i64 {
-    j.f.ne += 1;
-    let e = j.f.ne;
-    j.f.ekind[e] = kind;
-    j.f.enext[e] = j.f.nfirst[parent];
-    j.f.nfirst[parent] = e;
+    jj.f.ne += 1;
+    let e = jj.f.ne;
+    jj.f.ekind[e] = kind;
+    jj.f.enext[e] = jj.f.nfirst[parent];
+    jj.f.nfirst[parent] = e;
+    jj.f.eord[e] = jj.f.nkeys[parent] + jj.f.nidx[parent];
     return e;
+}
+
+fn too_big() -> i64 {
+    jj.err = "jx: the filter is too big for the automaton (256 nodes, 255 edges, 60 children of one value)";
+    return -1;
 }
 
 // the node for key keys[ko, ko+kl) below `node`, made if missing; -1 when the automaton is full
 fn child_key(node: i64, ko: i64, kl: i64) -> i64 {
-    var e = j.f.nfirst[node];
+    var e = jj.f.nfirst[node];
     while e != 0 {
-        if j.f.ekind[e] == 0 && j.f.eb[e] == kl && substr(j.f.keys, j.f.ea[e], kl) == substr(j.f.keys, ko, kl) { return j.f.enode[e]; }
-        e = j.f.enext[e];
+        if jj.f.ekind[e] == 0 && jj.f.eb[e] == kl && substr(jj.f.keys, jj.f.ea[e], kl) == substr(jj.f.keys, ko, kl) { return jj.f.enode[e]; }
+        e = jj.f.enext[e];
     }
-    if j.f.nn >= 64 || j.f.ne >= 62 { j.err = "jx: the filter is too big for the automaton (64 nodes, 62 edges)"; return -1; }
+    if jj.f.nn >= 255 || jj.f.ne >= 254 || jj.f.nkeys[node] + jj.f.nidx[node] >= 60 { return too_big(); }
     let n = new_node(node);
     e = new_entry(node, 0);
-    j.f.ea[e] = ko;
-    j.f.eb[e] = kl;
-    j.f.ef[e] = byte_at(j.f.keys, ko);
-    j.f.enode[e] = n;
-    j.f.nkeys[node] += 1;
+    jj.f.ea[e] = ko;
+    jj.f.eb[e] = kl;
+    jj.f.ef[e] = byte_at(jj.f.keys, ko);
+    jj.f.enode[e] = n;
+    jj.f.nkeys[node] += 1;
     return n;
 }
 
 fn child_idx(node: i64, k: i64) -> i64 {
-    var e = j.f.nfirst[node];
+    var e = jj.f.nfirst[node];
     while e != 0 {
-        if j.f.ekind[e] == 1 && j.f.ea[e] == k { return j.f.enode[e]; }
-        e = j.f.enext[e];
+        if jj.f.ekind[e] == 1 && jj.f.ea[e] == k { return jj.f.enode[e]; }
+        e = jj.f.enext[e];
     }
-    if j.f.nn >= 64 || j.f.ne >= 62 { j.err = "jx: the filter is too big for the automaton (64 nodes, 62 edges)"; return -1; }
+    if jj.f.nn >= 255 || jj.f.ne >= 254 || jj.f.nkeys[node] + jj.f.nidx[node] >= 60 { return too_big(); }
     let n = new_node(node);
     e = new_entry(node, 1);
-    j.f.ea[e] = k;
-    j.f.enode[e] = n;
-    j.f.nidx[node] += 1;
+    jj.f.ea[e] = k;
+    jj.f.enode[e] = n;
+    jj.f.nidx[node] += 1;
     return n;
 }
 
 fn child_iter(node: i64) -> i64 {
-    if j.f.niter[node] >= 0 { return j.f.niter[node]; }
-    if j.f.nn >= 64 { j.err = "jx: the filter is too big for the automaton (64 nodes)"; return -1; }
+    if jj.f.niter[node] >= 0 { return jj.f.niter[node]; }
+    if jj.f.nn >= 255 { return too_big(); }
     let n = new_node(node);
-    j.f.niter[node] = n;
+    jj.f.niter[node] = n;
     return n;
 }
+
+// ---- literals ----
 
 // the string literal at q (its quote) of the filter, unescaped onto `keys` (to_keys) or `lits`; the position after it, or -1
 fn filter_string(f: text, q: i64, to_keys: bool) -> i64 {
@@ -82,29 +126,87 @@ fn filter_string(f: text, q: i64, to_keys: bool) -> i64 {
     var rs = i;
     while true {
         let c = byte_at(f, i);
-        if c < 0 { j.err = "jx: a string in the filter does not end"; return -1; }
+        if c < 0 { jj.err = "jx: a string in the filter does not end"; return -1; }
         if c == 34 { break; }
         if c != 92 { i += 1; continue; }
         if byte_at(f, i + 1) == 40 { reject("string interpolation", i); return -1; }
         let d = byte_at(f, i + 1);
         if !(d == 34 || d == 92 || d == 47 || d == 98 || d == 102 || d == 110 || d == 114 || d == 116 || d == 117) {
-            j.err = "jx: invalid escape in a string of the filter";
+            jj.err = "jx: invalid escape in a string of the filter";
             return -1;
         }
-        if i > rs { if to_keys { j.f.keys += substr(f, rs, i - rs); } else { j.f.lits += substr(f, rs, i - rs); } }
+        if i > rs { if to_keys { jj.f.keys += substr(f, rs, i - rs); } else { jj.f.lits += substr(f, rs, i - rs); } }
         let cp = escape_cp(f, i);
-        if cp == 0 { if to_keys { j.f.keys += "\0"; } else { j.f.lits += "\0"; } }
-        else if to_keys { j.f.keys += chr(cp); } else { j.f.lits += chr(cp); }
-        i += j.sc.esc;
+        if cp == 0 { if to_keys { jj.f.keys += "\0"; } else { jj.f.lits += "\0"; } }
+        else if to_keys { jj.f.keys += chr(cp); } else { jj.f.lits += chr(cp); }
+        i += jj.sc.esc;
         rs = i;
     }
-    if i > rs { if to_keys { j.f.keys += substr(f, rs, i - rs); } else { j.f.lits += substr(f, rs, i - rs); } }
+    if i > rs { if to_keys { jj.f.keys += substr(f, rs, i - rs); } else { jj.f.lits += substr(f, rs, i - rs); } }
     return i + 1;
 }
 
-// one step below `node` for a key written at q (after the dot, or inside brackets); the new node or -1, the cursor after it in j.cp
-fn key_step(f: text, node: i64, q: i64) -> i64 {
-    let ko = len(j.f.keys);
+// a constant value entry
+fn new_const(tag: i64, vs: i64, a: i64, b: i64) -> i64 {
+    let h = jj.v.ncon;
+    if h >= 4000 { jj.err = "jx: too many literals in the filter"; return -1; }
+    jj.v.ncon = h + 1;
+    jj.v.vt[h] = tag;
+    jj.v.vs[h] = vs;
+    jj.v.va[h] = a;
+    jj.v.vb[h] = b;
+    jj.v.vf[h] = 0;
+    jj.v.vd[h] = -1;
+    jj.v.vn[h] = -1;
+    return h;
+}
+
+// a number literal at [q, e) of the filter text
+fn number_const(f: text, q: i64, e: i64) -> i64 {
+    var n = 0;
+    var k = q;
+    var plain = (e - q) <= 15;
+    while k < e && plain {
+        let c = byte_at(f, k);
+        if !is_digit(c) { plain = false; } else { n = n * 10 + c - 48; }
+        k += 1;
+    }
+    if plain { return new_const(4, 4, n, 0); }
+    return new_const(4, 1, q, e);
+}
+
+fn is_word(f: text, q: i64, w: text) -> bool {
+    let n = len(w);
+    if q + n > len(f) { return false; }
+    return substr(f, q, n) == w && !is_name_char(byte_at(f, q + n));
+}
+
+fn rej1(what: text, p: i64) -> i64 {
+    reject(what, p);
+    return -1;
+}
+
+fn syn1(what: text, p: i64) -> i64 {
+    syntax(what, p);
+    return -1;
+}
+
+// ---- the parser ----
+
+// builds `l | r` with the pipes nested to the right (a | b) | c is a | (b | c)
+fn mk_pipe(l: i64, r: i64, p: i64) -> i64 {
+    if l < 0 || r < 0 { return -1; }
+    if jj.f.ak[l] == K.PIPE {
+        let rr = mk_pipe(jj.f.ab[l], r, p);
+        if rr < 0 { return -1; }
+        return mk(K.PIPE, jj.f.aa[l], rr, 0, p);
+    }
+    return mk(K.PIPE, l, r, 0, p);
+}
+
+// the key at q (after a dot, or inside brackets), onto `keys`; the node's key offset and length in a, b; the position after it, or -1
+fn parse_key(f: text, q: i64) -> i64 {
+    let ko = len(jj.f.keys);
     var e = 0;
     if byte_at(f, q) == 34 {
         e = filter_string(f, q, true);
@@ -112,47 +214,50 @@ fn key_step(f: text, node: i64, q: i64) -> i64 {
     } else {
         e = q;
         while is_name_char(byte_at(f, e)) { e += 1; }
-        j.f.keys += substr(f, q, e - q);
+        jj.f.keys += substr(f, q, e - q);
     }
-    j.cp = e;
-    return child_key(node, ko, len(j.f.keys) - ko);
+    jj.cp = e;
+    return ko;
 }
 
-// a path starting at the dot at j.cp, below `node`; the node reached, or -1 (j.err set); the cursor after it in j.cp.
-// iter_ok: `[]` is allowed; j.f_iter is set to 1 when one was taken
-fn parse_path(f: text, node0: i64, iter_ok: bool) -> i64 {
-    var node = node0;
-    var q = j.cp;
-    var first = true;
-    while true {
-        // at a dot
-        q += 1;
-        let c = byte_at(f, q);
-        if c == 46 { reject("`..`", q); return -1; }
-        if is_name_start(c) || c == 34 {
-            node = key_step(f, node, q);
-            if node < 0 { return -1; }
-            q = j.cp;
-        } else if c == 91 {
-            // brackets follow
-        } else if is_digit(c) {
-            j.err = "jx: syntax error: a field name cannot start with a digit";
-            return -1;
-        } else {
-            // a bare dot
-            if !first { j.err = "jx: syntax error: a dot with no field after it"; return -1; }
+fn parse_postfix(f: text, t0: i64) -> i64 {
+    var t = t0;
+    while t >= 0 {
+        var q = jj.cp;
+        var c = byte_at(f, q);
+        if c == 46 {
+            let d = byte_at(f, q + 1);
+            if d == 46 { reject("`..`", q); return -1; }
+            if is_name_start(d) || d == 34 {
+                let ko = parse_key(f, q + 1);
+                if ko < 0 { return -1; }
+                t = mk(K.FIELD, t, ko, len(jj.f.keys) - ko, q);
+                continue;
+            }
+            if d == 91 { jj.cp = q + 1; continue; }
+            if is_digit(d) { syntax("a field name cannot start with a digit", q); return -1; }
+            break;
         }
-        first = false;
-        while byte_at(f, q) == 91 {
+        q = skip_ws(f, q);
+        c = byte_at(f, q);
+        if c == 91 {
             q = skip_ws(f, q + 1);
             let d = byte_at(f, q);
             if d == 93 {
-                if !iter_ok { reject("`[]` inside select(...) (a generator in a condition)", q); return -1; }
-                node = child_iter(node);
-                if node < 0 { return -1; }
-                j.f_iter = 1;
-                q += 1;
-            } else if is_digit(d) {
+                t = mk(K.ITER, t, 0, 0, q);
+                jj.cp = q + 1;
+                continue;
+            }
+            if d == 34 {
+                let ko = parse_key(f, q);
+                if ko < 0 { return -1; }
+                q = skip_ws(f, jj.cp);
+                if byte_at(f, q) != 93 { syntax("expected ] after the key", q); return -1; }
+                t = mk(K.FIELD, t, ko, len(jj.f.keys) - ko, q);
+                jj.cp = q + 1;
+                continue;
+            }
+            if is_digit(d) {
                 var n = 0;
                 while is_digit(byte_at(f, q)) {
                     if n > 100000000000 { reject("an index this large", q); return -1; }
@@ -161,191 +266,807 @@ fn parse_path(f: text, node0: i64, iter_ok: bool) -> i64 {
                 }
                 q = skip_ws(f, q);
                 if byte_at(f, q) == 58 { reject("a slice", q); return -1; }
-                if byte_at(f, q) != 93 { j.err = "jx: syntax error: expected ] after the index"; return -1; }
-                q += 1;
-                node = child_idx(node, n);
-                if node < 0 { return -1; }
-            } else if d == 34 {
-                node = key_step(f, node, q);
-                if node < 0 { return -1; }
-                q = skip_ws(f, j.cp);
-                if byte_at(f, q) != 93 { j.err = "jx: syntax error: expected ] after the key"; return -1; }
-                q += 1;
-            } else if d == 45 {
-                reject("a negative index (it needs the array's length)", q);
-                return -1;
-            } else if d == 58 {
-                reject("a slice", q);
-                return -1;
-            } else {
-                reject("an expression inside [...]", q);
-                return -1;
+                if byte_at(f, q) != 93 { syntax("expected ] after the index", q); return -1; }
+                t = mk(K.IDX, t, n, 0, q);
+                jj.cp = q + 1;
+                continue;
             }
+            if d == 45 { reject("a negative index (it needs the array's length)", q); return -1; }
+            if d == 58 { reject("a slice", q); return -1; }
+            reject("an expression inside [...]", q);
+            return -1;
         }
-        if byte_at(f, q) == 63 { reject("the `?` operator", q); return -1; }
-        if byte_at(f, q) == 46 {
-            let n1 = byte_at(f, q + 1);
-            if is_name_start(n1) || n1 == 34 || n1 == 91 { continue; }
-        }
+        if c == 63 { reject("the `?` operator", q); return -1; }
+        if is_word(f, q, "as") { reject("variables (`as`)", q); return -1; }
         break;
     }
-    j.cp = q;
-    return node;
+    return t;
 }
 
-fn add_instr(op: i64, slot: i64, arg: i64) -> i64 {
-    if j.f.npr >= 64 { j.err = "jx: the filter is too big"; return 1; }
-    j.f.pop[j.f.npr] = op;
-    j.f.pslot[j.f.npr] = slot;
-    j.f.parg[j.f.npr] = arg;
-    j.f.npr += 1;
+fn parse_object(f: text, p0: i64) -> i64 {
+    // after the brace
+    let first = jj.f.nobj;
+    var cnt = 0;
+    var q = skip_ws(f, jj.cp);
+    if byte_at(f, q) == 125 { jj.cp = q + 1; return mk(K.OBJ, first, 0, 0, p0); }
+    while true {
+        q = skip_ws(f, q);
+        if jj.f.nobj >= 255 { jj.err = "jx: too many object entries in the filter"; return -1; }
+        let c = byte_at(f, q);
+        var key = -1;
+        var shorthand = -1;
+        if c == 34 {
+            let lo = len(jj.f.lits);
+            let e = filter_string(f, q, false);
+            if e < 0 { return -1; }
+            key = mk(K.LIT, new_const(5, 1, lo, len(jj.f.lits) - lo), 0, 0, q);
+            let ko = len(jj.f.keys);
+            if filter_string(f, q, true) < 0 { return -1; }
+            shorthand = mk(K.FIELD, mk(K.ID, 0, 0, 0, q), ko, len(jj.f.keys) - ko, q);
+            q = e;
+        } else if is_name_start(c) {
+            var e = q;
+            while is_name_char(byte_at(f, e)) { e += 1; }
+            let lo = len(jj.f.lits);
+            jj.f.lits += substr(f, q, e - q);
+            key = mk(K.LIT, new_const(5, 1, lo, e - q), 0, 0, q);
+            let ko = len(jj.f.keys);
+            jj.f.keys += substr(f, q, e - q);
+            shorthand = mk(K.FIELD, mk(K.ID, 0, 0, 0, q), ko, e - q, q);
+            q = e;
+        } else if c == 40 {
+            jj.cp = q + 1;
+            key = parse_expr(f, 1);
+            if key < 0 { return -1; }
+            q = skip_ws(f, jj.cp);
+            if byte_at(f, q) != 41 { syntax("expected ) after the key", q); return -1; }
+            q += 1;
+        } else if c == 36 {
+            return rej1("`$name` in an object", q);
+        } else if c == 64 {
+            return rej1("a format string in an object", q);
+        } else {
+            return syn1("an object key must be a name, a string or (expression)", q);
+        }
+        q = skip_ws(f, q);
+        var val = -1;
+        if byte_at(f, q) == 58 {
+            jj.cp = skip_ws(f, q + 1);
+            // an object value is a term, with unary minus and pipes between terms (jq's ExpD)
+            var v = parse_unary(f);
+            if v < 0 { return -1; }
+            while true {
+                let q2 = skip_ws(f, jj.cp);
+                if byte_at(f, q2) == 124 && byte_at(f, q2 + 1) != 61 {
+                    jj.cp = q2 + 1;
+                    let r = parse_unary(f);
+                    if r < 0 { return -1; }
+                    v = mk_pipe(v, r, q2);
+                    if v < 0 { return -1; }
+                } else { break; }
+            }
+            val = v;
+            q = skip_ws(f, jj.cp);
+        } else {
+            if shorthand < 0 { return syn1("expected : after the key", q); }
+            val = shorthand;
+        }
+        let o = jj.f.nobj;
+        jj.f.okey[o] = key;
+        jj.f.oval[o] = val;
+        jj.f.nobj = o + 1;
+        cnt += 1;
+        let d = byte_at(f, q);
+        if d == 44 { q += 1; continue; }
+        if d == 125 { jj.cp = q + 1; break; }
+        return syn1("expected , or } in the object", q);
+    }
+    return mk(K.OBJ, first, cnt, 0, p0);
+}
+
+fn parse_if(f: text, p0: i64) -> i64 {
+    // after `if` or `elif`
+    let c = parse_expr(f, 1);
+    if c < 0 { return -1; }
+    var q = skip_ws(f, jj.cp);
+    if !is_word(f, q, "then") { return syn1("expected `then`", q); }
+    jj.cp = q + 4;
+    let t = parse_expr(f, 1);
+    if t < 0 { return -1; }
+    q = skip_ws(f, jj.cp);
+    var e = -1;
+    if is_word(f, q, "elif") {
+        jj.cp = q + 4;
+        e = parse_if(f, q);
+        if e < 0 { return -1; }
+        return mk(K.IF, c, t, e, p0);
+    }
+    if is_word(f, q, "else") {
+        jj.cp = q + 4;
+        e = parse_expr(f, 1);
+        if e < 0 { return -1; }
+        q = skip_ws(f, jj.cp);
+    } else {
+        e = mk(K.ID, 0, 0, 0, q);
+    }
+    if !is_word(f, q, "end") { return syn1("expected `end`", q); }
+    jj.cp = q + 3;
+    return mk(K.IF, c, t, e, p0);
+}
+
+// the arguments of a builtin: `(` expr `)`; the expression, or -1
+fn parse_arg(f: text, name: text) -> i64 {
+    var q = skip_ws(f, jj.cp);
+    if byte_at(f, q) != 40 { syntax("`" + name + "` needs an argument in parentheses", q); return -1; }
+    jj.cp = q + 1;
+    let a = parse_expr(f, 1);
+    if a < 0 { return -1; }
+    q = skip_ws(f, jj.cp);
+    if byte_at(f, q) == 59 { reject("a second argument to `" + name + "`", q); return -1; }
+    if byte_at(f, q) != 41 { syntax("expected ) after the argument", q); return -1; }
+    jj.cp = q + 1;
+    return a;
+}
+
+// a call without arguments must not have parentheses with arguments
+fn no_args(f: text, name: text) -> bool {
+    let q = skip_ws(f, jj.cp);
+    if byte_at(f, q) == 40 { reject("`" + name + "(...)` with arguments", q); return false; }
+    return true;
+}
+
+fn parse_primary(f: text) -> i64 {
+    let q = skip_ws(f, jj.cp);
+    let c = byte_at(f, q);
+    if c < 0 { return syn1("unexpected end of the filter", q); }
+    if c == 46 {
+        let d = byte_at(f, q + 1);
+        if d == 46 { reject("`..`", q); return -1; }
+        if is_name_start(d) || d == 34 {
+            let ko = parse_key(f, q + 1);
+            if ko < 0 { return -1; }
+            return mk(K.FIELD, mk(K.ID, 0, 0, 0, q), ko, len(jj.f.keys) - ko, q);
+        }
+        if is_digit(d) { syntax("a number cannot start with a dot", q); return -1; }
+        jj.cp = q + 1;
+        return mk(K.ID, 0, 0, 0, q);
+    }
+    if is_digit(c) {
+        let e = scan_number(f, q);
+        if e < 0 { jj.err = "jx: syntax error: invalid number in the filter"; return -1; }
+        jj.cp = e;
+        let h = number_const(f, q, e);
+        if h < 0 { return -1; }
+        return mk(K.LIT, h, 0, 0, q);
+    }
+    if c == 34 {
+        let lo = len(jj.f.lits);
+        let e = filter_string(f, q, false);
+        if e < 0 { return -1; }
+        jj.cp = e;
+        let h = new_const(5, 1, lo, len(jj.f.lits) - lo);
+        if h < 0 { return -1; }
+        return mk(K.LIT, h, 0, 0, q);
+    }
+    if c == 40 {
+        jj.cp = q + 1;
+        let e = parse_expr(f, 1);
+        if e < 0 { return -1; }
+        let q2 = skip_ws(f, jj.cp);
+        if byte_at(f, q2) != 41 { syntax("expected )", q2); return -1; }
+        jj.cp = q2 + 1;
+        return e;
+    }
+    if c == 91 {
+        jj.cp = q + 1;
+        let q2 = skip_ws(f, jj.cp);
+        if byte_at(f, q2) == 93 { jj.cp = q2 + 1; return mk(K.ARR, -1, -1, -1, q); }
+        let e = parse_expr(f, 1);
+        if e < 0 { return -1; }
+        let q3 = skip_ws(f, jj.cp);
+        if byte_at(f, q3) != 93 { syntax("expected ]", q3); return -1; }
+        jj.cp = q3 + 1;
+        return mk(K.ARR, e, -1, -1, q);
+    }
+    if c == 123 {
+        jj.cp = q + 1;
+        return parse_object(f, q);
+    }
+    if c == 36 { reject("variables (`$name`)", q); return -1; }
+    if c == 64 { reject("a format string (`@...`)", q); return -1; }
+    if is_name_start(c) {
+        var e = q;
+        while is_name_char(byte_at(f, e)) { e += 1; }
+        let w = substr(f, q, e - q);
+        jj.cp = e;
+        if w == "true" { return mk(K.LIT, jj.ev.htrue, 0, 0, q); }
+        if w == "false" { return mk(K.LIT, jj.ev.hfalse, 0, 0, q); }
+        if w == "null" { return mk(K.LIT, jj.ev.hnull, 0, 0, q); }
+        if w == "if" { return parse_if(f, q); }
+        if w == "empty" { if !no_args(f, w) { return -1; } return mk(K.EMPTY, 0, 0, 0, q); }
+        if w == "length" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.LENGTH, q); }
+        if w == "type" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.TYPE, q); }
+        if w == "keys" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.KEYS, q); }
+        if w == "not" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.NOT, q); }
+        if w == "add" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.ADD, q); }
+        if w == "tostring" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.TOSTRING, q); }
+        if w == "tonumber" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.TONUMBER, q); }
+        if w == "floor" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.FLOOR, q); }
+        if w == "ceil" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.CEIL, q); }
+        if w == "round" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.ROUND, q); }
+        if w == "sqrt" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.SQRT, q); }
+        if w == "fabs" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.FABS, q); }
+        if w == "first" {
+            if !no_args(f, w) { return -1; }
+            return mk(K.IDX, mk(K.ID, 0, 0, 0, q), 0, 0, q);
+        }
+        if w == "has" {
+            let a = parse_arg(f, w);
+            if a < 0 { return -1; }
+            return mk(K.FN, a, -1, F.HAS, q);
+        }
+        if w == "select" {
+            let a = parse_arg(f, w);
+            if a < 0 { return -1; }
+            return mk(K.SELECT, a, 0, 0, q);
+        }
+        if w == "map" {
+            let a = parse_arg(f, w);
+            if a < 0 { return -1; }
+            let it = mk(K.ITER, mk(K.ID, 0, 0, 0, q), 0, 0, q);
+            let pp = mk_pipe(it, a, q);
+            if pp < 0 { return -1; }
+            return mk(K.ARR, pp, -1, -1, q);
+        }
+        if w == "then" || w == "else" || w == "elif" || w == "end" || w == "and" || w == "or" || w == "as" || w == "catch" {
+            return syn1("unexpected `" + w + "`", q);
+        }
+        return rej1("`" + w + "`", q);
+    }
+    reject("`" + substr(f, q, 1) + "`", q);
+    return -1;
+}
+
+fn parse_unary(f: text) -> i64 {
+    let q = skip_ws(f, jj.cp);
+    if byte_at(f, q) == 45 {
+        jj.cp = q + 1;
+        let e = parse_unary(f);
+        if e < 0 { return -1; }
+        // a number literal folds: -1 is a literal
+        if jj.f.ak[e] == K.LIT {
+            let h = jj.f.aa[e];
+            if jj.v.vt[h] == 4 && jj.v.vs[h] == 4 { return mk(K.LIT, new_const(4, 4, -jj.v.va[h], 0), 0, 0, q); }
+            if jj.v.vt[h] == 4 && jj.v.vs[h] == 1 {
+                let hh = new_const(4, 1, jj.v.va[h], jj.v.vb[h]);
+                jj.v.vf[hh] = 1;
+                return mk(K.LIT, hh, 0, 0, q);
+            }
+        }
+        return mk(K.NEG, e, 0, 0, q);
+    }
+    jj.cdepth += 1;
+    if jj.cdepth > 20 { return rej1("expressions nested more than 20 deep", q); }
+    let t = parse_primary(f);
+    let r = parse_postfix(f, t);
+    jj.cdepth -= 1;
+    return r;
+}
+
+// the operator at q: its precedence in the low bits, its kind * 64; 0 when none. jj.cp is left at the end of it.
+// precedence: 1 `|`, 2 `,`, 3 `//`, 5 or, 6 and, 7 comparison, 8 + -, 9 * / %
+fn peek_op(f: text, q: i64) -> i64 {
+    let c = byte_at(f, q);
+    let d = byte_at(f, q + 1);
+    if c == 124 { if d == 61 { return -1; } return 1 + 64 * 1; }
+    if c == 44 { return 2 + 64 * 2; }
+    if c == 47 && d == 47 { if byte_at(f, q + 2) == 61 { return -1; } return 3 + 64 * 3; }
+    if c == 111 && is_word(f, q, "or") { return 5 + 64 * 5; }
+    if c == 97 && is_word(f, q, "and") { return 6 + 64 * 6; }
+    if c == 61 && d == 61 { return 7 + 64 * 11; }
+    if c == 33 && d == 61 { return 7 + 64 * 12; }
+    if c == 60 && d == 61 { return 7 + 64 * 14; }
+    if c == 62 && d == 61 { return 7 + 64 * 16; }
+    if c == 60 { return 7 + 64 * 13; }
+    if c == 62 { return 7 + 64 * 15; }
+    if c == 61 { return -1; }
+    if (c == 43 || c == 45 || c == 42 || c == 47 || c == 37) && d == 61 { return -1; }
+    if c == 43 { return 8 + 64 * 21; }
+    if c == 45 { return 8 + 64 * 22; }
+    if c == 42 { return 9 + 64 * 23; }
+    if c == 47 { return 9 + 64 * 24; }
+    if c == 37 { return 9 + 64 * 25; }
     return 0;
 }
 
-// the condition of select( at j.cp (after the paren): a path, then `)` or an operator and a literal, then `)`
-fn parse_select(f: text, node: i64) -> i64 {
-    var q = skip_ws(f, j.cp);
-    if byte_at(f, q) != 46 { return reject("a condition that does not start with a path", q); }
-    j.cp = q;
-    let cn = parse_path(f, node, false);
-    if cn < 0 { return 1; }
-    j.f.want[cn] = 1;
-    q = skip_ws(f, j.cp);
-    var c = byte_at(f, q);
-    var op = 0;
-    if c == 41 {
-        j.cp = q + 1;
-        return add_instr(1, cn, 7);
-    }
-    let c2 = byte_at(f, q + 1);
-    if c == 61 && c2 == 61 { op = 1; q += 2; }
-    else if c == 33 && c2 == 61 { op = 2; q += 2; }
-    else if c == 60 && c2 == 61 { op = 4; q += 2; }
-    else if c == 62 && c2 == 61 { op = 6; q += 2; }
-    else if c == 60 { op = 3; q += 1; }
-    else if c == 62 { op = 5; q += 1; }
-    else { return reject("a condition other than `path`, or `path` compared with a literal", q); }
-    q = skip_ws(f, q);
-    if j.f.nlit >= 32 { j.err = "jx: too many literals"; return 1; }
-    let l = j.f.nlit;
-    j.f.nlit += 1;
-    c = byte_at(f, q);
-    if c == 34 {
-        j.f.lkind[l] = 5;
-        j.f.la[l] = len(j.f.lits);
-        let e = filter_string(f, q, false);
-        if e < 0 { return 1; }
-        j.f.lb[l] = len(j.f.lits) - j.f.la[l];
-        q = e;
-    } else if c == 45 || is_digit(c) {
-        let e = scan_number(f, q);
-        if e < 0 { j.err = "jx: syntax error: invalid number in the filter"; return 1; }
-        j.f.lkind[l] = 4;
-        j.f.la[l] = q;
-        j.f.lb[l] = e;
-        q = e;
-    } else if c == 116 && substr(f, q, 4) == "true" && !is_name_char(byte_at(f, q + 4)) {
-        j.f.lkind[l] = 3;
-        q += 4;
-    } else if c == 102 && substr(f, q, 5) == "false" && !is_name_char(byte_at(f, q + 5)) {
-        j.f.lkind[l] = 2;
-        q += 5;
-    } else if c == 110 && substr(f, q, 4) == "null" && !is_name_char(byte_at(f, q + 4)) {
-        j.f.lkind[l] = 1;
-        q += 4;
-    } else {
-        return reject("comparing with anything but a literal (a number, string, true, false or null)", q);
-    }
-    q = skip_ws(f, q);
-    if byte_at(f, q) != 41 { return reject("anything but one comparison inside select(...)", q); }
-    j.cp = q + 1;
-    return add_instr(1, cn, l * 8 + op);
-}
-
-fn word_at(f: text, q: i64) -> text {
-    var e = q;
-    while is_name_char(byte_at(f, e)) { e += 1; }
-    return substr(f, q, e - q);
-}
-
-// the filter: 0, or 1 with j.err set
-fn compile(f: text) -> i64 {
-    j.f.nn = 1;
-    j.f.par[0] = -1;
-    j.f.niter[0] = -1;
-    j.f.nunit = -1;
-    var cur = 0;
-    var seen_select = false;
-    var length_last = false;
-    j.cp = skip_ws(f, 0);
-    if j.cp >= len(f) { return reject("an empty filter", 0); }
+fn parse_expr(f: text, minp: i64) -> i64 {
+    var lhs = parse_unary(f);
+    if lhs < 0 { return -1; }
+    var last_cmp = false;
     while true {
-        let q = skip_ws(f, j.cp);
-        let c = byte_at(f, q);
-        if length_last { return reject("a step after `length` (it makes a new value)", q); }
-        if c == 46 {
-            j.cp = q;
-            j.f_iter = 0;
-            let nn = parse_path(f, cur, true);
-            if nn < 0 { return 1; }
-            if j.f_iter != 0 && seen_select { return reject("`[]` after select (it needs buffering: Stage 3)", q); }
-            cur = nn;
-        } else if is_name_start(c) {
-            let w = word_at(f, q);
-            if w == "select" {
-                var e = skip_ws(f, q + 6);
-                if byte_at(f, e) != 40 { return reject("select without its parenthesis", e); }
-                j.cp = e + 1;
-                if parse_select(f, cur) != 0 { return 1; }
-                seen_select = true;
-            } else if w == "length" {
-                j.cp = q + 6;
-                length_last = true;
-            } else {
-                return reject("`" + w + "`", q);
-            }
-        } else {
-            return reject("`" + substr(f, q, 1) + "`", q);
-        }
-        let q2 = skip_ws(f, j.cp);
-        let d = byte_at(f, q2);
-        if d < 0 { break; }
-        if d != 124 { return reject("`" + substr(f, q2, 1) + "` (only `|` joins steps)", q2); }
-        j.cp = q2 + 1;
+        let q = skip_ws(f, jj.cp);
+        let o = peek_op(f, q);
+        if o == 0 { break; }
+        if o < 0 { reject("assignment or update operators", q); return -1; }
+        let prec = o % 64;
+        let kind = o / 64;
+        if prec < minp { break; }
+        if prec == 7 {
+            if last_cmp { syntax("comparisons do not chain", q); return -1; }
+            last_cmp = true;
+        } else { last_cmp = false; }
+        var oplen = 1;
+        if kind == 3 || kind == 5 || kind == 11 || kind == 12 || kind == 14 || kind == 16 { oplen = 2; }
+        if kind == 6 { oplen = 3; }
+        jj.cp = q + oplen;
+        var rhs = -1;
+        if prec == 1 || prec == 3 { rhs = parse_expr(f, prec); } else { rhs = parse_expr(f, prec + 1); }
+        if rhs < 0 { return -1; }
+        if kind == 1 { lhs = mk_pipe(lhs, rhs, q); }
+        else if kind == 2 { lhs = mk(K.COMMA, lhs, rhs, 0, q); }
+        else if kind == 3 { lhs = mk(K.ALT, lhs, rhs, 0, q); }
+        else if kind == 5 { lhs = mk(K.OR, lhs, rhs, 0, q); }
+        else if kind == 6 { lhs = mk(K.AND, lhs, rhs, 0, q); }
+        else { lhs = mk(K.BIN, lhs, rhs, kind, q); }
+        if lhs < 0 { return -1; }
     }
-    j.f.want[cur] = 1;
-    if length_last { if add_instr(3, cur, 0) != 0 { return 1; } }
-    else { if add_instr(2, cur, 0) != 0 { return 1; } }
-    var n = 0;
+    return lhs;
+}
+
+// ---- analysis ----
+
+// 0 exactly one output, 1 at most one, 2 any number
+fn cls(e: i64) -> i64 {
+    let k = jj.f.ak[e];
+    if k == K.ITER || k == K.COMMA { return 2; }
+    if k == K.PLAY { return 2; }
+    if k == K.EMPTY || k == K.SELECT { return 1; }
+    if k == K.FIELD || k == K.IDX { return cls(jj.f.aa[e]); }
+    if k == K.PIPE {
+        let a = cls(jj.f.aa[e]);
+        let b = cls(jj.f.ab[e]);
+        if a == 2 || b == 2 { return 2; }
+        if a == 1 || b == 1 { return 1; }
+        return 0;
+    }
+    if k == K.ALT {
+        if cls(jj.f.aa[e]) != 0 { return 2; }
+        return cls(jj.f.ab[e]);
+    }
+    if k == K.IF {
+        var m = cls(jj.f.ab[e]);
+        let m2 = cls(jj.f.ac[e]);
+        if m2 > m { m = m2; }
+        return m;
+    }
+    if k == K.NEG { return cls(jj.f.aa[e]); }
+    return 0;
+}
+
+fn is_path(e: i64) -> bool {
+    let k = jj.f.ak[e];
+    if k == K.ID { return true; }
+    if k == K.FIELD || k == K.IDX { return is_path(jj.f.aa[e]); }
+    return false;
+}
+
+fn want_node(n: i64) {
+    if n >= 0 { jj.f.want[n] = 1; }
+}
+
+// the node a pure path reaches from `ctx`, creating the nodes; -1 when ctx is unknown; -2 on error
+fn an_nav(e: i64, ctx: i64) -> i64 {
+    let k = jj.f.ak[e];
+    if k == K.ID { return ctx; }
+    let n = an_nav(jj.f.aa[e], ctx);
+    if n < 0 { return n; }
+    if k == K.FIELD { let c = child_key(n, jj.f.ab[e], jj.f.ac[e]); if c < 0 { return -2; } return c; }
+    let c = child_idx(n, jj.f.ab[e]);
+    if c < 0 { return -2; }
+    return c;
+}
+
+// a step (.k, [n], []) on a generator: g | step. Rewrites node e in place; true when it did
+fn norm_step(e: i64) -> bool {
+    let k = jj.f.ak[e];
+    if k != K.FIELD && k != K.IDX && k != K.ITER { return false; }
+    if cls(jj.f.aa[e]) == 0 { return false; }
+    let st = mk(k, mk(K.ID, 0, 0, 0, jj.f.at[e]), jj.f.ab[e], jj.f.ac[e], jj.f.at[e]);
+    if st < 0 { return false; }
+    jj.f.ak[e] = K.PIPE;
+    jj.f.ab[e] = st;
+    return true;
+}
+
+fn copy_node(dst: i64, src: i64) {
+    jj.f.ak[dst] = jj.f.ak[src];
+    jj.f.aa[dst] = jj.f.aa[src];
+    jj.f.ab[dst] = jj.f.ab[src];
+    jj.f.ac[dst] = jj.f.ac[src];
+    jj.f.ad[dst] = jj.f.ad[src];
+    jj.f.at[dst] = jj.f.at[src];
+}
+
+// a generator (ITER or any iteration of a node with a known path) that can stream: the node whose elements it visits, else -1
+fn stream_src(it: i64, ctx: i64) -> i64 {
+    if jj.f.ak[it] != K.ITER { return -1; }
+    let s = jj.f.aa[it];
+    if !is_path(s) { return -1; }
+    if ctx < 0 { return -1; }
+    return an_nav(s, ctx);
+}
+
+fn new_reg(kind: i64) -> i64 {
+    if jj.f.nreg >= 63 { jj.err = "jx: the filter is too big (64 registers)"; return -1; }
+    let r = jj.f.nreg;
+    jj.f.nreg = r + 1;
+    jj.f.r_kind[r] = kind;
+    jj.f.r_depth[r] = jj.an_depth;
+    jj.f.r_own[r] = jj.an_unit;
+    return r;
+}
+
+// a scope: the iteration `it` of a path from ctx, the body that follows (-1: the elements themselves).
+// term: 1 print, 2 register (a list), 3 add fold, 4 count fold. root is the tree node that becomes the playback
+fn an_scope(root: i64, it: i64, ctx: i64, nxt: i64, body0: i64, term: i64) -> i64 {
+    var p = an_nav(jj.f.aa[it], ctx);
+    if p < 0 { return -2; }
+    var iter = child_iter(p);
+    if iter < 0 { return -2; }
+    var body = body0;
+    if jj.an_depth >= 3 { reject("iterations nested more than 3 deep", jj.f.at[root]); return -2; }
+    if jj.f.nscope >= 31 { jj.err = "jx: the filter is too big (32 iterations)"; return -2; }
+    let s = jj.f.nscope;
+    jj.f.nscope = s + 1;
+    jj.f.anyscope = true;
+    jj.f.s_iter[s] = iter;
+    jj.f.s_par[s] = p;
+    jj.f.s_body[s] = body;
+    jj.f.s_term[s] = term;
+    jj.f.s_depth[s] = jj.an_depth + 1;
+    jj.f.s_own[s] = jj.an_unit;
+    jj.f.s_play[s] = root;
+    jj.f.s_next[s] = jj.f.sc1[iter];
+    jj.f.sc1[iter] = s;
+    want_node(p);
+    if term != 1 {
+        var kind = 0;
+        if term == 3 { kind = 3; }
+        if term == 4 { kind = 4; }
+        let r = new_reg(kind);
+        if r < 0 { return -2; }
+        jj.f.s_reg[s] = r;
+    }
+    let sd = jj.an_depth;
+    let su = jj.an_unit;
+    jj.an_depth = sd + 1;
+    jj.an_unit = iter;
+    if body >= 0 {
+        if an(body, iter, -1, false) == -2 { return -2; }
+    } else {
+        want_node(iter);
+    }
+    jj.an_depth = sd;
+    jj.an_unit = su;
+    // the root of the scope pipeline plays the register back
+    jj.f.ak[root] = K.PLAY;
+    jj.f.aa[root] = s;
+    jj.f.nx[root] = nxt;
+    return -1;
+}
+
+fn is_gen_head(e: i64, ctx: i64) -> bool {
+    if jj.f.ak[e] == K.PIPE { return stream_src(jj.f.aa[e], ctx) >= 0; }
+    return stream_src(e, ctx) >= 0;
+}
+
+// analyze e with the static context ctx (the automaton node its input is, -1 unknown); nxt is the node that takes its outputs
+// (-1: the terminal of the enclosing scope body). Returns the context of the outputs: a node, -1 unknown, -2 on error.
+fn an(e: i64, ctx: i64, nxt: i64, direct: bool) -> i64 {
+    let k = jj.f.ak[e];
+    jj.f.nx[e] = nxt;
+    if k == K.ID { want_node(ctx); return ctx; }
+    if k == K.NODE { return jj.f.aa[e]; }
+    if k == K.LIT || k == K.EMPTY { return -1; }
+    if k == K.FIELD || k == K.IDX {
+        let src = jj.f.aa[e];
+        if cls(src) != 0 {
+            // a step after a generator: g | step
+            let st = mk(k, mk(K.ID, 0, 0, 0, jj.f.at[e]), jj.f.ab[e], jj.f.ac[e], jj.f.at[e]);
+            if st < 0 { return -2; }
+            jj.f.ak[e] = K.PIPE;
+            jj.f.ab[e] = st;
+            return an(e, ctx, nxt, direct);
+        }
+        if is_path(src) {
+            let n = an_nav(e, ctx);
+            if n == -2 { return -2; }
+            if n >= 0 {
+                jj.f.ak[e] = K.NODE;
+                jj.f.aa[e] = n;
+                want_node(n);
+                return n;
+            }
+            if an(src, ctx, -1, false) == -2 { return -2; }
+            return -1;
+        }
+        let rc = an(src, ctx, -1, false);
+        if rc == -2 { return -2; }
+        if rc >= 0 {
+            var c = -1;
+            if k == K.FIELD { c = child_key(rc, jj.f.ab[e], jj.f.ac[e]); } else { c = child_idx(rc, jj.f.ab[e]); }
+            if c < 0 { return -2; }
+            want_node(c);
+            return c;
+        }
+        return -1;
+    }
+    if k == K.ITER {
+        let src = jj.f.aa[e];
+        if cls(src) != 0 {
+            let st = mk(K.ITER, mk(K.ID, 0, 0, 0, jj.f.at[e]), 0, 0, jj.f.at[e]);
+            if st < 0 { return -2; }
+            jj.f.ak[e] = K.PIPE;
+            jj.f.ab[e] = st;
+            return an(e, ctx, nxt, direct);
+        }
+        if stream_src(e, ctx) >= 0 {
+            var term = 2;
+            if direct && nxt < 0 { term = 1; }
+            return an_scope(e, e, ctx, nxt, -1, term);
+        }
+        if an(src, ctx, -1, false) == -2 { return -2; }
+        return -1;
+    }
+    if k == K.PIPE {
+        let l = jj.f.aa[e];
+        let r = jj.f.ab[e];
+        if jj.f.ak[l] == K.ID {
+            copy_node(e, r);
+            return an(e, ctx, nxt, direct);
+        }
+        if norm_step(l) { return an(e, ctx, nxt, direct); }
+        if jj.f.ak[l] == K.PIPE {
+            // (a | b) | c is a | (b | c)
+            let nr = mk_pipe(jj.f.ab[l], r, jj.f.at[e]);
+            if nr < 0 { return -2; }
+            jj.f.aa[e] = jj.f.aa[l];
+            jj.f.ab[e] = nr;
+            return an(e, ctx, nxt, direct);
+        }
+        // [..] | add and [..] | length fold while collecting
+        if jj.f.ak[l] == K.ARR && jj.f.aa[l] >= 0 {
+            var h = r;
+            var rest = -1;
+            if jj.f.ak[r] == K.PIPE { h = jj.f.aa[r]; rest = jj.f.ab[r]; }
+            if jj.f.ak[h] == K.FN && (jj.f.ac[h] == F.ADD || jj.f.ac[h] == F.LENGTH) {
+                var fk = 1;
+                if jj.f.ac[h] == F.LENGTH { fk = 2; }
+                jj.f.ak[l] = K.FOLD;
+                jj.f.ac[l] = fk;
+                if rest < 0 { copy_node(e, l); return an(e, ctx, nxt, direct); }
+                jj.f.aa[e] = l;
+                jj.f.ab[e] = rest;
+                return an(e, ctx, nxt, direct);
+            }
+        }
+        if jj.f.ak[l] == K.ITER && stream_src(l, ctx) >= 0 {
+            var term = 2;
+            if direct && nxt < 0 { term = 1; }
+            return an_scope(e, l, ctx, nxt, r, term);
+        }
+        let rc = an(l, ctx, r, false);
+        if rc == -2 { return -2; }
+        var d2 = false;
+        let lk = jj.f.ak[l];
+        if direct && (lk == K.NODE || lk == K.FIELD || lk == K.IDX) { d2 = true; }
+        return an(r, rc, nxt, d2);
+    }
+    if k == K.COMMA {
+        let a = an(jj.f.aa[e], ctx, nxt, direct);
+        if a == -2 { return -2; }
+        let b = an(jj.f.ab[e], ctx, nxt, false);
+        if b == -2 { return -2; }
+        return -1;
+    }
+    if k == K.ALT {
+        if cls(jj.f.aa[e]) != 0 { return reject("a generator on the left of `//`", jj.f.at[e]) - 3; }
+        if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
+        if an(jj.f.ab[e], ctx, nxt, false) == -2 { return -2; }
+        return -1;
+    }
+    if k == K.BIN || k == K.AND || k == K.OR {
+        var l = jj.f.aa[e];
+        var r = jj.f.ab[e];
+        if cls(l) != 0 || cls(r) != 0 {
+            // a generator next to a constant: g op c is g | (. op c)
+            if cls(l) != 0 && cls(r) == 0 && jj.f.ak[r] == K.LIT {
+                jj.f.ak[e] = K.PIPE;
+                let id = mk(K.ID, 0, 0, 0, jj.f.at[e]);
+                let nb = mk(k, id, r, jj.f.ac[e], jj.f.at[e]);
+                if nb < 0 { return -2; }
+                let g = l;
+                jj.f.aa[e] = g;
+                jj.f.ab[e] = nb;
+                return an(e, ctx, nxt, direct);
+            }
+            if cls(r) != 0 && cls(l) == 0 && jj.f.ak[l] == K.LIT && cls(r) == 2 {
+                return reject("a generator as an operand", jj.f.at[e]) - 3;
+            }
+            return reject("a generator, `empty` or `select` as an operand (it multiplies the results)", jj.f.at[e]) - 3;
+        }
+        if an(l, ctx, -1, false) == -2 { return -2; }
+        if an(r, ctx, -1, false) == -2 { return -2; }
+        l = jj.f.aa[e];
+        r = jj.f.ab[e];
+        if k == K.BIN && jj.f.ac[e] >= 11 && jj.f.ac[e] <= 16 && jj.f.ak[l] == K.NODE && jj.f.ak[r] == K.LIT {
+            let nd = jj.f.aa[l];
+            let lh = jj.f.aa[r];
+            jj.f.ak[e] = K.CMPLIT;
+            jj.f.aa[e] = nd;
+            jj.f.ab[e] = lh;
+        }
+        return -1;
+    }
+    if k == K.NEG {
+        if cls(jj.f.aa[e]) != 0 { return reject("a generator as an operand", jj.f.at[e]) - 3; }
+        if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
+        return -1;
+    }
+    if k == K.IF {
+        if cls(jj.f.aa[e]) != 0 { return reject("a generator or `select` as the condition of `if`", jj.f.at[e]) - 3; }
+        if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
+        let a = an(jj.f.ab[e], ctx, nxt, false);
+        if a == -2 { return -2; }
+        let b = an(jj.f.ac[e], ctx, nxt, false);
+        if b == -2 { return -2; }
+        if a == b { return a; }
+        return -1;
+    }
+    if k == K.SELECT {
+        if cls(jj.f.aa[e]) != 0 { return reject("a generator or `select` inside `select(...)`", jj.f.at[e]) - 3; }
+        if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
+        if nxt < 0 { want_node(ctx); }
+        return ctx;
+    }
+    if k == K.ARR {
+        let body = jj.f.aa[e];
+        if body < 0 { return -1; }
+        if is_gen_head(body, ctx) {
+            // [ g | body ]: collected while streaming
+            var bh = body;
+            var rest = -1;
+            if jj.f.ak[body] == K.PIPE { bh = jj.f.aa[body]; rest = jj.f.ab[body]; }
+            let sid = jj.f.nscope;
+            if an_scope(body, bh, ctx, -1, rest, 2) == -2 { return -2; }
+            jj.f.ab[e] = sid;
+            jj.f.ac[e] = -1;
+            return -1;
+        }
+        let r = new_reg(0);
+        if r < 0 { return -2; }
+        jj.f.ac[e] = r;
+        jj.f.ab[e] = -1;
+        if an(body, ctx, -1, false) == -2 { return -2; }
+        return -1;
+    }
+    if k == K.FOLD {
+        let body = jj.f.aa[e];
+        let term = 2 + jj.f.ac[e];
+        if is_gen_head(body, ctx) {
+            var bh = body;
+            var rest = -1;
+            if jj.f.ak[body] == K.PIPE { bh = jj.f.aa[body]; rest = jj.f.ab[body]; }
+            let sid = jj.f.nscope;
+            if an_scope(body, bh, ctx, -1, rest, term) == -2 { return -2; }
+            jj.f.ab[e] = sid;
+            return -1;
+        }
+        let r = new_reg(2 + jj.f.ac[e]);
+        if r < 0 { return -2; }
+        jj.f.ad[e] = r;
+        jj.f.ab[e] = -1;
+        if an(body, ctx, -1, false) == -2 { return -2; }
+        return -1;
+    }
+    if k == K.OBJ {
+        var i = 0;
+        while i < jj.f.ab[e] {
+            let o = jj.f.aa[e] + i;
+            let ke = jj.f.okey[o];
+            let ve = jj.f.oval[o];
+            if cls(ke) != 0 || cls(ve) != 0 { return reject("a generator, `empty` or `select` inside an object (it multiplies the objects)", jj.f.at[e]) - 3; }
+            if an(ke, ctx, -1, false) == -2 { return -2; }
+            if an(ve, ctx, -1, false) == -2 { return -2; }
+            i += 1;
+        }
+        return -1;
+    }
+    if k == K.FN {
+        let id = jj.f.ac[e];
+        if id == F.ADD && ctx >= 0 {
+            // add over the elements of a node: a fold that streams
+            let it = mk(K.ITER, mk(K.ID, 0, 0, 0, jj.f.at[e]), 0, 0, jj.f.at[e]);
+            if it < 0 { return -2; }
+            jj.f.ak[e] = K.FOLD;
+            jj.f.aa[e] = it;
+            jj.f.ac[e] = 1;
+            return an(e, ctx, nxt, direct);
+        }
+        want_node(ctx);
+        if id == F.KEYS && ctx >= 0 { jj.f.wantkeys[ctx] = 1; }
+        if id == F.HAS {
+            let a = jj.f.aa[e];
+            if cls(a) != 0 { return reject("a generator inside `has(...)`", jj.f.at[e]) - 3; }
+            if ctx >= 0 {
+                if jj.f.ak[a] != K.LIT { return reject("`has` with a computed argument on a value of the document (a constant is needed)", jj.f.at[e]) - 3; }
+                let h = jj.f.aa[a];
+                if jj.v.vt[h] == 5 {
+                    // the key's node must exist so that its presence is recorded
+                    var ko = len(jj.f.keys);
+                    jj.f.keys += substr(jj.f.lits, jj.v.va[h], jj.v.vb[h]);
+                    let c = child_key(ctx, ko, jj.v.vb[h]);
+                    if c < 0 { return -2; }
+                    want_node(c);
+                }
+            }
+            if an(a, ctx, -1, false) == -2 { return -2; }
+        }
+        return -1;
+    }
+    return -2;
+}
+
+// ---- the whole filter ----
+
+fn compile(f: text) -> i64 {
+    jj.f.nn = 1;
+    jj.f.par[0] = -1;
+    jj.f.niter[0] = -1;
+    jj.f.sc1[0] = -1;
+    jj.f.owner[0] = -1;
+    jj.f.nast = 0;
+    jj.cdepth = 0;
+    jj.cp = skip_ws(f, 0);
+    if jj.cp >= len(f) { return reject("an empty filter", 0); }
+    let root = parse_expr(f, 1);
+    if root < 0 { return 1; }
+    let q = skip_ws(f, jj.cp);
+    if byte_at(f, q) >= 0 { return syntax("unexpected `" + substr(f, q, 1) + "`", q); }
+    // the expression tree must not nest deeper than the evaluator's recursion allows
+    jj.f.root = root;
+    jj.an_depth = 0;
+    jj.an_unit = -1;
+    if an(root, 0, -1, true) == -2 { if len(jj.err) == 0 { jj.err = "jx: internal error in the filter analysis"; } return 1; }
+    // owners: the nearest unit at or above each node; count the document level slots
+    var n = 1;
+    while n < jj.f.nn {
+        let p = jj.f.par[n];
+        if jj.f.sc1[n] >= 0 { jj.f.owner[n] = n; } else { jj.f.owner[n] = jj.f.owner[p]; }
+        n += 1;
+    }
     var w = 0;
-    while w < j.f.nn {
-        if j.f.want[w] != 0 { n += 1; }
-        if j.f.niter[w] >= 0 && (j.f.nkeys[w] != 0 || j.f.nidx[w] != 0) {
+    var cnt = 0;
+    while w < jj.f.nn {
+        if jj.f.want[w] != 0 && jj.f.owner[w] < 0 { cnt += 1; }
+        w += 1;
+    }
+    jj.f.nwant = cnt;
+    w = 0;
+    while w < jj.f.nn {
+        if jj.f.niter[w] >= 0 && (jj.f.nkeys[w] != 0 || jj.f.nidx[w] != 0) {
             return reject("`[]` together with a key or an index on the same value", 0);
         }
         w += 1;
     }
-    j.f.nwant = n;
-    // where a missing value would be iterated: children come after their parents, so go backwards
-    var m = j.f.nn - 1;
-    while m >= 0 {
-        if j.f.niter[m] >= 0 { j.f.ib[m] = 1; }
-        let pm = j.f.par[m];
-        if pm >= 0 && j.f.niter[pm] != m && j.f.ib[m] != 0 { j.f.ib[pm] = 1; j.f.chk[pm] = 1; }
-        m -= 1;
-    }
-    // the unit: the deepest `[]` on the path to the result
-    var u = cur;
-    while u > 0 {
-        let p = j.f.par[u];
-        if j.f.niter[p] == u {
-            j.f.nunit = u;
-            j.f.unit[u] = 1;
-            var a = p;
-            while a >= 0 { j.f.stream[a] = 1; a = j.f.par[a]; }
-            break;
+    // stream: a unit lies at or below the node
+    var u = 0;
+    while u < jj.f.nn {
+        if jj.f.sc1[u] >= 0 {
+            var a = u;
+            while a >= 0 { jj.f.stream[a] = 1; a = jj.f.par[a]; }
         }
-        u = p;
+        u += 1;
     }
     return 0;
 }

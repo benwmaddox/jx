@@ -1,9 +1,10 @@
-// jx: a jq-compatible extractor that reads its input once, front to back (docs/design.md, Stage 1).
-//   jx.mito      this file: the state and `@main`
+// jx: a jq-compatible extractor that reads its input once, front to back (docs/design.md, Stage 2).
+//   jx.mito      this file: the state and the entry point
 //   util.mito    small helpers
-//   compile.mito the filter text -> a path automaton (a trie of wanted paths) and a slot program
-//   scan.mito    the scanner: one forward pass, validating, filling slots, running the program at unit ends
-//   prog.mito    the slot program: compare, length, output
+//   num.mito     decimal text to double, double to jq's text
+//   compile.mito the filter text -> an expression tree, a path automaton (a trie of wanted paths) and scopes
+//   scan.mito    the scanner: one forward pass, validating, filling slots, running scope bodies at element ends
+//   eval.mito    values in the arena and the evaluator (arithmetic, comparison, constructors, builtins)
 //   out.mito     writing values the way jq does (compact or indented, numbers and strings normalized)
 // Nothing is allocated at run time; every size is declared here.
 
@@ -11,73 +12,105 @@ platform cli;
 
 const Lim {
     MAX_DEPTH: i64 = 10000;      // nesting depth of the input (jq's own limit)
-    NODES: i64 = 64;             // nodes in the path automaton
-    ENTRIES: i64 = 62;           // child entries (keys, indexes, iterations) in the automaton
-    PROG: i64 = 64;              // instructions of the slot program
-    LITS: i64 = 32;              // literals in select(...) comparisons
+    REG1: i64 = 1048576;         // value entries of an arena at nesting depth 1, 2, 3
+    REG0: i64 = 16777216;        // value entries of the document level arena
 }
 
 // the filter, compiled
 struct Filt {
     nn: i64;                      // nodes used; node 0 is the document
     ne: i64;                      // child entries used (entry ids start at 1; 0 means none)
-    nwant: i64;                   // nodes whose value a slot holds
-    nunit: i64;                   // the node whose completion runs the program (an element), -1: the document
-    npr: i64;                     // instructions
-    nlit: i64;
-    par: i64[64];                 // per node: its parent, -1 for the root
-    want: i64[64];                // 1 when a slot keeps the node's value
-    unit: i64[64];                // 1 for the unit node
-    stream: i64[64];              // 1 when the unit is at or below the node
-    ib: i64[64];                  // 1 when a `[]` is reachable from the node through keys and indexes only (a missing value there is an error)
-    chk: i64[64];                 // 1 when a key or index child has ib set
-    nfirst: i64[64];              // first child entry of the node, 0 none
-    niter: i64[64];               // the node reached by `[]`, -1 none
-    nkeys: i64[64];               // children by key
-    nidx: i64[64];                // children by index
-    ekind: i64[63];               // 0 key, 1 index
-    ea: i64[63];                  // key: offset in `keys`; index: the number
-    eb: i64[63];                  // key: length
-    ef: i64[63];                  // key: its first byte
-    enode: i64[63];
-    enext: i64[63];
-    keys: utf8<4096>;             // wanted keys, unescaped
-    lits: utf8<4096>;             // string literals, unescaped
-    // the slot program: op, slot (a node), argument
-    pop: i64[64];
-    pslot: i64[64];
-    parg: i64[64];
-    // literals: kind (1 null, 2 false, 3 true, 4 number, 5 string), where (number: span in the filter text; string: offset in `lits`)
-    lkind: i64[32];
-    la: i64[32];
-    lb: i64[32];
+    nwant: i64;                   // document level nodes whose value a slot holds (the scan may stop when all are filled)
+    nscope: i64;
+    nreg: i64;
+    nobj: i64;
+    root: i64;                    // the expression to run at the end of the document
+    anyscope: bool;
+    par: i64[256];                // per node: its parent, -1 for the root
+    want: i64[256];               // 1 when a slot keeps the node's value
+    wantkeys: i64[256];           // 1 when the keys of the object are collected
+    owner: i64[256];              // the nearest unit node at or above this node, -1 for none
+    sc1: i64[256];                // first scope run when this node's value ends, -1 none
+    stream: i64[256];             // 1 when a unit is at or below the node
+    nfirst: i64[256];             // first child entry of the node, 0 none
+    niter: i64[256];              // the node reached by `[]`, -1 none
+    nkeys: i64[256];              // children by key
+    nidx: i64[256];               // children by index
+    ekind: i64[256];              // 0 key, 1 index
+    ea: i64[256];                 // key: offset in `keys`; index: the number
+    eb: i64[256];                 // key: length
+    ef: i64[256];                 // key: its first byte
+    eord: i64[256];               // ordinal among the node's entries (for the bit set per object)
+    enode: i64[256];
+    enext: i64[256];
+    keys: utf8<8192>;             // wanted keys, unescaped
+    lits: utf8<8192>;             // string literals, unescaped
+    // the expression tree
+    ak: i64[1024];                // kind
+    aa: i64[1024];
+    ab: i64[1024];
+    ac: i64[1024];
+    ad: i64[1024];
+    nx: i64[1024];                // the continuation: the node that takes this node's outputs, -1 the terminal of the enclosing scope body
+    at: i64[1024];                // position in the filter text, for errors
+    nast: i64;
+    // object constructors: key expression and value expression
+    okey: i64[256];
+    oval: i64[256];
+    // scopes: a streamed iteration of a node, its body, where the body's results go
+    s_iter: i64[32];              // the iteration node
+    s_par: i64[32];               // the node iterated (its value tells whether the iteration is an error)
+    s_body: i64[32];              // the first node of the body, -1 for the element itself
+    s_term: i64[32];              // 1 print, 2 register, 3 add fold, 4 count fold
+    s_reg: i64[32];
+    s_depth: i64[32];             // nesting depth of the body (1 for a body run at the end of an element of the document)
+    s_own: i64[32];               // the unit node whose element contains the playback, -1 the document
+    s_next: i64[32];              // next scope on the same iteration node
+    s_play: i64[32];              // the tree node that plays the register back
+    // registers: lists being collected, folds
+    r_kind: i64[64];              // 0 list, 3 add, 4 count
+    r_depth: i64[64];             // the depth of the arena the results live in
+    r_own: i64[64];               // the unit node whose element a register belongs to, -1 the document
 }
 
 // the scanner's stack and the slots
 struct Scan {
     sp: i64;                      // open containers
     exit_depth: i64;              // when every slot is filled: the depth of the container to finish, then stop (0 none)
-    ugen: i64;                    // the unit's generation: a slot is filled when its sgen equals this
     nfilled: i64;
-    esc: i64;                     // set by scan_string: the string has a backslash or a DEL
+    esc: i64;                     // set by scan_string: 1 has a backslash or a DEL, 2 has a byte of 128 or more
+    ival: i64;                    // set by scan_number: the value of an integer literal of at most 15 digits
+    isint: bool;
+    anyerr: bool;                 // a navigation error was recorded in this run
+    validate: bool;
     fnode: i64[10002];            // per open container: its automaton node, -1 when skipped
     fkind: i64[10002];            // 6 array, 7 object
     fcnt: i64[10002];             // elements or keys so far
     fstart: i64[10002];           // where it starts
     fseen: i64[10002];            // bit per child entry already matched in this object
-    sgen: i64[64];                // per node (the slot)
-    stag: i64[64];                // 4 number, 5 string, 6 array, 7 object, 1 null, 2 false, 3 true
-    sa: i64[64];
-    sb: i64[64];
-    scnt: i64[64];
-    sesc: i64[64];
+    fkh: i64[10002];              // collected keys: first entry
+    fkt: i64[10002];              // collected keys: last entry
+    ugen: i64[256];               // per unit node: the generation of its element's slots
+    sgen: i64[256];               // per node (the slot)
+    stag: i64[256];               // 4 number, 5 string, 6 array, 7 object, 1 null, 2 false, 3 true
+    sa: i64[256];
+    sb: i64[256];
+    scnt: i64[256];
+    sesc: i64[256];
+    sint: i64[256];
+    sisint: i64[256];
+    skh: i64[256];                // collected keys of an object slot: first entry, -1 none
+    skn: i64[256];
+    serr: i64[256];               // the tag of a value that could not be navigated below this node (0 none)
+    serrg: i64[256];
 }
 
 struct Out {
-    text: utf8<33554432>;         // everything written
+    text: utf8<4294967295>;       // everything written (4 GiB - 1, the most an answer can hold)
     sep: bool;                    // a result was written already: a newline comes first
     pretty: bool;
     raw: bool;
+    to: i64;                      // 0 write to `text`, 1 write to the scratch string (tostring)
     results: i64;
 }
 
@@ -93,32 +126,172 @@ struct Dec {
     adj: i64;                     // exponent of the leading digit plus one: value in [10^(adj-1), 10^adj)
 }
 
+// values: entries in the arena. Fields by kind:
+//   vt tag 1 null, 2 false, 3 true, 4 number, 5 string, 6 array, 7 object
+//   number:   vs 4 integer in va; 0 literal at [va, vb) of the document; 1 literal in the filter text; 3 double in vx; vf bit 1: negated, bit 2: absolute
+//   string:   vs 0 document span with quotes at [va, vb), vf the escape flags; 1 plain bytes in the filter's literals; 2 in the scratch string; 3 in the persistent text; va offset, vb length
+//   container: vs 0 a span of the document, vf the count, vd the automaton node; vs 1 built: va first entry, vb last entry, vf count (an object's entries are pairs: va key, vb value)
+//   vn the next entry of a chain
+struct Val {
+    vt: u8[19930112];
+    vs: u8[19930112];
+    va: i64[19930112];
+    vb: i64[19930112];
+    vx: f64[19930112];
+    vf: i32[19930112];
+    vd: i32[19930112];
+    vn: i32[19930112];
+    base: i64[4];                 // first entry of the arena at depth 0, 1, 2, 3
+    top: i64[4];
+    cap: i64[4];                  // one past the last entry
+    ncon: i64;
+}
+
+struct Ev {
+    depth: i64;                   // arena depth the evaluator allocates in
+    err: i64;                     // 0 none, 1 a jq error, 2 not supported (fatal)
+    tp: i64;                      // terminal stack
+    tk: i64[64];
+    ta: i64[64];
+    rh: i64[64];                  // registers: first entry, last entry, count
+    rt: i64[64];
+    rc: i64[64];
+    rg: i64[64];                  // generation stamp
+    rerr: i64[64];                // a deferred error of a register's scope body
+    ax: f64[64];                  // fold: the sum so far
+    at: i64[64];                  // fold: 0 nothing yet, 1 a value (handle in ah), 2 a double
+    ah: i64[64];
+    scr: utf8<16777216>;          // scratch strings
+    ptx: utf8<268435456>;         // strings that outlive the element
+    tmp2: utf8<1048576>;
+    tmp3: utf8<1048576>;
+    stk: i64[64];
+    hnull: i64;
+    htrue: i64;
+    hfalse: i64;
+    htype: i64[8];                // the names of the types as constants
+    harr0: i64;                   // an empty array
+    nanv: f64;
+    emsg: utf8<300>;
+}
+
 struct J {
     f: Filt;
     sc: Scan;
     o: Out;
+    v: Val;
+    ev: Ev;
+    num: Num;
     d1: Dec;
     d2: Dec;
     tmp: utf8<1048576>;           // an unescaped string for comparing
     err: utf8<300>;
     cp: i64;                      // the filter compiler's cursor
-    f_iter: i64;                  // set when a path just parsed took a `[]`
+    an_depth: i64;                // compile: body nesting depth
+    an_unit: i64;                 // compile: the unit node of the body being analyzed
+    cdepth: i64;
 }
-state j: J;
+state jj: J;
 
+// Options. The runtime (runtime/cli.c) turns every `-x` and `--name [value]` into an input of the program and ignores the ones the
+// program does not declare, so every letter and the identifier-shaped jq long options are declared here to be refused with a message.
+// Not catchable without a runtime change: an unknown long option written after the filter, and long options with a hyphen
+// (`--raw-output`, `--sort-keys`, `--null-input` ...), which are silently ignored; an unknown option with a value in front of the
+// filter takes the filter as its value ("no filter given"). jq exits with 2 on a usage error; a program can only exit with 1.
 // the input size is the one literal in `doc: utf8<N>` below (1 GiB; reserved address space, committed as the input is read)
 @main
-fn main(filter: utf8<1..1000> from arg(0), doc: utf8<1073741824> from stdin, c: bool = false, r: bool = false) -> Response<text> {
-    j.o.pretty = !c;
-    j.o.raw = r;
-    if compile(filter) != 0 { return status(400, j.err); }
-    if scan(doc, filter) != 0 { return status(400, j.err); }
-    if j.o.results > 0 { j.o.text += "\n"; }
-    return ok(j.o.text);
+fn main(filter: utf8<0..1000>? from arg(0), doc: utf8<1073741824> from stdin, c: bool = false, r: bool = false, validate: utf8<0..1000>?, a: bool = false, b: bool = false, d: bool = false, e: bool = false, f: bool = false, g: bool = false, h: bool = false, i: bool = false, j: bool = false, k: bool = false, l: bool = false, m: bool = false, n: bool = false, o: bool = false, p: bool = false, q: bool = false, s: bool = false, t: bool = false, u: bool = false, v: bool = false, w: bool = false, x: bool = false, y: bool = false, z: bool = false, A: bool = false, B: bool = false, C: bool = false, D: bool = false, E: bool = false, F: bool = false, G: bool = false, H: bool = false, I: bool = false, J: bool = false, K: bool = false, L: bool = false, M: bool = false, N: bool = false, O: bool = false, P: bool = false, Q: bool = false, R: bool = false, S: bool = false, T: bool = false, U: bool = false, V: bool = false, W: bool = false, X: bool = false, Y: bool = false, Z: bool = false, tab: utf8<0..1000>?, indent: utf8<0..1000>?, arg: utf8<0..1000>?, argjson: utf8<0..1000>?, args: utf8<0..1000>?, jsonargs: utf8<0..1000>?, slurp: utf8<0..1000>?, stream: utf8<0..1000>?, seq: utf8<0..1000>?, slurpfile: utf8<0..1000>?, rawfile: utf8<0..1000>?, help: utf8<0..1000>?, version: utf8<0..1000>?, unbuffered: utf8<0..1000>?, binary: utf8<0..1000>?, strict: utf8<0..1000>?, explain: utf8<0..1000>?) -> Response<text> {
+    if a { return status(400, "jx: option '-a' is not supported yet"); }
+    if b { return status(400, "jx: unknown option '-b'"); }
+    if d { return status(400, "jx: unknown option '-d'"); }
+    if e { return status(400, "jx: option '-e' is not supported yet"); }
+    if f { return status(400, "jx: option '-f' is not supported yet"); }
+    if g { return status(400, "jx: unknown option '-g'"); }
+    if h { return status(400, "jx: option '-h' is not supported yet"); }
+    if i { return status(400, "jx: unknown option '-i'"); }
+    if j { return status(400, "jx: option '-j' is not supported yet"); }
+    if k { return status(400, "jx: unknown option '-k'"); }
+    if l { return status(400, "jx: unknown option '-l'"); }
+    if m { return status(400, "jx: unknown option '-m'"); }
+    if n { return status(400, "jx: option '-n' is not supported yet"); }
+    if o { return status(400, "jx: unknown option '-o'"); }
+    if p { return status(400, "jx: unknown option '-p'"); }
+    if q { return status(400, "jx: unknown option '-q'"); }
+    if s { return status(400, "jx: option '-s' is not supported yet"); }
+    if t { return status(400, "jx: unknown option '-t'"); }
+    if u { return status(400, "jx: unknown option '-u'"); }
+    if v { return status(400, "jx: unknown option '-v'"); }
+    if w { return status(400, "jx: unknown option '-w'"); }
+    if x { return status(400, "jx: unknown option '-x'"); }
+    if y { return status(400, "jx: unknown option '-y'"); }
+    if z { return status(400, "jx: unknown option '-z'"); }
+    if A { return status(400, "jx: unknown option '-A'"); }
+    if B { return status(400, "jx: unknown option '-B'"); }
+    if C { return status(400, "jx: option '-C' is not supported yet"); }
+    if D { return status(400, "jx: unknown option '-D'"); }
+    if E { return status(400, "jx: unknown option '-E'"); }
+    if F { return status(400, "jx: unknown option '-F'"); }
+    if G { return status(400, "jx: unknown option '-G'"); }
+    if H { return status(400, "jx: unknown option '-H'"); }
+    if I { return status(400, "jx: unknown option '-I'"); }
+    if J { return status(400, "jx: unknown option '-J'"); }
+    if K { return status(400, "jx: unknown option '-K'"); }
+    if L { return status(400, "jx: option '-L' is not supported yet"); }
+    if M { return status(400, "jx: option '-M' is not supported yet"); }
+    if N { return status(400, "jx: unknown option '-N'"); }
+    if O { return status(400, "jx: unknown option '-O'"); }
+    if P { return status(400, "jx: unknown option '-P'"); }
+    if Q { return status(400, "jx: unknown option '-Q'"); }
+    if R { return status(400, "jx: option '-R' is not supported yet"); }
+    if S { return status(400, "jx: option '-S' is not supported yet"); }
+    if T { return status(400, "jx: unknown option '-T'"); }
+    if U { return status(400, "jx: unknown option '-U'"); }
+    if V { return status(400, "jx: option '-V' is not supported yet"); }
+    if W { return status(400, "jx: unknown option '-W'"); }
+    if X { return status(400, "jx: unknown option '-X'"); }
+    if Y { return status(400, "jx: unknown option '-Y'"); }
+    if Z { return status(400, "jx: unknown option '-Z'"); }
+    if tab != null { return status(400, "jx: option '--tab' is not supported yet"); }
+    if indent != null { return status(400, "jx: option '--indent' is not supported yet"); }
+    if arg != null { return status(400, "jx: option '--arg' is not supported yet"); }
+    if argjson != null { return status(400, "jx: option '--argjson' is not supported yet"); }
+    if args != null { return status(400, "jx: option '--args' is not supported yet"); }
+    if jsonargs != null { return status(400, "jx: option '--jsonargs' is not supported yet"); }
+    if slurp != null { return status(400, "jx: option '--slurp' is not supported yet"); }
+    if stream != null { return status(400, "jx: option '--stream' is not supported yet"); }
+    if seq != null { return status(400, "jx: option '--seq' is not supported yet"); }
+    if slurpfile != null { return status(400, "jx: option '--slurpfile' is not supported yet"); }
+    if rawfile != null { return status(400, "jx: option '--rawfile' is not supported yet"); }
+    if help != null { return status(400, "jx: option '--help' is not supported yet"); }
+    if version != null { return status(400, "jx: option '--version' is not supported yet"); }
+    if unbuffered != null { return status(400, "jx: option '--unbuffered' is not supported yet"); }
+    if binary != null { return status(400, "jx: option '--binary' is not supported yet"); }
+    if strict != null { return status(400, "jx: option '--strict' is not supported yet"); }
+    if explain != null { return status(400, "jx: option '--explain' is not supported yet"); }
+    // `--validate FILTER` takes the filter as its value: give it back
+    var rc = 0;
+    if validate != null && filter == null && validate != "true" { rc = go(validate, doc, c, r, true); }
+    else if filter == null { return status(400, "jx: no filter given (an option with a value may have taken it: write the filter first, or use `--option=value`)"); }
+    else { rc = go(filter, doc, c, r, validate != null); }
+    if rc != 0 { return status(400, jj.err); }
+    if jj.o.results > 0 { jj.o.text += "\n"; }
+    return ok(jj.o.text);
+}
+
+fn go(filter: text, doc: text, c: bool, r: bool, check: bool) -> i64 {
+    jj.o.pretty = !c;
+    jj.o.raw = r;
+    jj.sc.validate = check;
+    num_init();
+    ev_init();
+    if compile(filter) != 0 { return 1; }
+    return scan(doc, filter);
 }
 
 use "util.mito";
+use "num.mito";
 use "compile.mito";
 use "scan.mito";
 use "prog.mito";
+use "eval.mito";
 use "out.mito";

@@ -1,7 +1,7 @@
 """Checks src/num.mito (decimal literal -> double -> jq's text) against Python's float() and a model of jq's printer,
 and, with --jq, the model against the real jq. Usage: python tests/numcheck.py [numtool.exe] [count]"""
 import random, struct, subprocess, sys, math
-from decimal import Decimal, getcontext
+from decimal import Decimal, getcontext, Context, ROUND_HALF_EVEN
 from fractions import Fraction
 sys.path.insert(0, __file__.rsplit('tests', 1)[0] + 'tests')
 from numfmt import jqfmt
@@ -56,7 +56,8 @@ def main():
         for s, o in zip(items, lines):
             total += 1
             try:
-                m = jqfmt(float(s))
+                # jq reduces a literal to 17 significant digits (half even) before converting it to a double
+                m = jqfmt(float(Context(prec=17, rounding=ROUND_HALF_EVEN, Emax=999999, Emin=-999999).plus(Decimal(s))))
             except OverflowError:
                 m = jqfmt(math.inf)
             if m != o:

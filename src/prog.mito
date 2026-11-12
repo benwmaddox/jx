@@ -1,8 +1,4 @@
-// The slot program, run when a unit (an element, or the document) is complete. Instructions:
-//   1 CMP slot, literal*8 + operator   keep going when the comparison holds, else end the unit (jq's select)
-//   2 OUT slot                         write the slot's value
-//   3 LEN slot                         write jq's `length` of the slot's value
-// Operators: 1 ==, 2 !=, 3 <, 4 <=, 5 >, 6 >=, 7 truthy.
+// Exact decimal comparison of number literals and byte string comparison.
 
 // where the digits of a number at [a, b) start and how it is shaped, in d
 fn dec_parse(t: text, a: i64, b: i64, d: write Dec) {
@@ -53,30 +49,30 @@ fn dec_digit(t: text, d: Dec, m: i64) -> i64 {
 
 // -1, 0 or 1: the number in t1 at [a1, b1) against the one in t2 at [a2, b2), exactly
 fn num_cmp(t1: text, a1: i64, b1: i64, t2: text, a2: i64, b2: i64) -> i64 {
-    dec_parse(t1, a1, b1, j.d1);
-    dec_parse(t2, a2, b2, j.d2);
-    if j.d1.zero && j.d2.zero { return 0; }
-    if j.d1.zero { if j.d2.neg { return 1; } return -1; }
-    if j.d2.zero { if j.d1.neg { return -1; } return 1; }
-    if j.d1.neg != j.d2.neg { if j.d1.neg { return -1; } return 1; }
+    dec_parse(t1, a1, b1, jj.d1);
+    dec_parse(t2, a2, b2, jj.d2);
+    if jj.d1.zero && jj.d2.zero { return 0; }
+    if jj.d1.zero { if jj.d2.neg { return 1; } return -1; }
+    if jj.d2.zero { if jj.d1.neg { return -1; } return 1; }
+    if jj.d1.neg != jj.d2.neg { if jj.d1.neg { return -1; } return 1; }
     var m = 0;
-    if j.d1.adj != j.d2.adj {
-        if j.d1.adj < j.d2.adj { m = -1; } else { m = 1; }
+    if jj.d1.adj != jj.d2.adj {
+        if jj.d1.adj < jj.d2.adj { m = -1; } else { m = 1; }
     } else {
-        var n = j.d1.nd;
-        if j.d2.nd < n { n = j.d2.nd; }
+        var n = jj.d1.nd;
+        if jj.d2.nd < n { n = jj.d2.nd; }
         var q = 0;
         while q < n && m == 0 {
-            let x = dec_digit(t1, j.d1, j.d1.k + q);
-            let y = dec_digit(t2, j.d2, j.d2.k + q);
+            let x = dec_digit(t1, jj.d1, jj.d1.k + q);
+            let y = dec_digit(t2, jj.d2, jj.d2.k + q);
             if x < y { m = -1; } else if x > y { m = 1; }
             q += 1;
         }
-        if m == 0 && j.d1.nd != j.d2.nd {
-            if j.d1.nd < j.d2.nd { m = -1; } else { m = 1; }
+        if m == 0 && jj.d1.nd != jj.d2.nd {
+            if jj.d1.nd < jj.d2.nd { m = -1; } else { m = 1; }
         }
     }
-    if j.d1.neg { return -m; }
+    if jj.d1.neg { return -m; }
     return m;
 }
 
@@ -96,93 +92,3 @@ fn bytes_cmp(x: text, xo: i64, xn: i64, y: text, yo: i64, yn: i64) -> i64 {
     return 1;
 }
 
-// the slot's value against literal l: jq's order (null < false < true < numbers < strings < arrays < objects)
-fn cmp_slot(doc: text, filter: text, slot: i64, l: i64) -> i64 {
-    var tag = 1;
-    if j.sc.sgen[slot] == j.sc.ugen { tag = j.sc.stag[slot]; }
-    let lt = j.f.lkind[l];
-    if tag != lt { if tag < lt { return -1; } return 1; }
-    if tag == 4 { return num_cmp(doc, j.sc.sa[slot], j.sc.sb[slot], filter, j.f.la[l], j.f.lb[l]); }
-    if tag == 5 {
-        let a = j.sc.sa[slot];
-        let b = j.sc.sb[slot];
-        if j.sc.sesc[slot] != 0 {
-            decode_string(doc, a, b);
-            return bytes_cmp(j.tmp, 0, len(j.tmp), j.f.lits, j.f.la[l], j.f.lb[l]);
-        }
-        return bytes_cmp(doc, a + 1, b - a - 2, j.f.lits, j.f.la[l], j.f.lb[l]);
-    }
-    return 0;
-}
-
-fn test_slot(doc: text, filter: text, slot: i64, arg: i64) -> bool {
-    let op = arg % 8;
-    if op == 7 {
-        if j.sc.sgen[slot] != j.sc.ugen { return false; }
-        return j.sc.stag[slot] >= 3;
-    }
-    let c = cmp_slot(doc, filter, slot, arg / 8);
-    if op == 1 { return c == 0; }
-    if op == 2 { return c != 0; }
-    if op == 3 { return c < 0; }
-    if op == 4 { return c <= 0; }
-    if op == 5 { return c > 0; }
-    return c >= 0;
-}
-
-fn write_slot(doc: text, slot: i64) {
-    if j.sc.sgen[slot] != j.sc.ugen {
-        begin_result();
-        j.o.text += "null";
-        return;
-    }
-    write_value(doc, j.sc.stag[slot], j.sc.sa[slot], j.sc.sb[slot], j.sc.sesc[slot]);
-}
-
-// jq's `length` of the slot's value
-fn write_length(doc: text, slot: i64) -> i64 {
-    var tag = 1;
-    if j.sc.sgen[slot] == j.sc.ugen { tag = j.sc.stag[slot]; }
-    let a = j.sc.sa[slot];
-    let b = j.sc.sb[slot];
-    if tag == 1 { begin_result(); j.o.text += "0"; return 0; }
-    if tag == 2 || tag == 3 { return fail_at("boolean (" + substr(doc, a, b - a) + ") has no length", a); }
-    begin_result();
-    if tag == 4 { write_number(doc, a, b, true); return 0; }
-    if tag == 6 || tag == 7 { j.o.text += str(j.sc.scnt[slot]); return 0; }
-    // a string: its characters
-    var n = 0;
-    var i = 0;
-    if j.sc.sesc[slot] != 0 {
-        decode_string(doc, a, b);
-        while i < len(j.tmp) {
-            if (byte_at(j.tmp, i) & 192) != 128 { n += 1; }
-            i += 1;
-        }
-    } else {
-        i = a + 1;
-        while i < b - 1 {
-            if (byte_at(doc, i) & 192) != 128 { n += 1; }
-            i += 1;
-        }
-    }
-    j.o.text += str(n);
-    return 0;
-}
-
-fn run_program(doc: text, filter: text) -> i64 {
-    var i = 0;
-    while i < j.f.npr {
-        let op = j.f.pop[i];
-        let slot = j.f.pslot[i];
-        if op == 1 {
-            if !test_slot(doc, filter, slot, j.f.parg[i]) { return 0; }
-        } else if op == 2 {
-            write_slot(doc, slot);
-        } else {
-            if write_length(doc, slot) != 0 { return 1; }
-        }
-        i += 1;
-    }
-    return 0;
-}

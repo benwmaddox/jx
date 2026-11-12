@@ -1,0 +1,1331 @@
+// Values and the evaluator. A value is an entry of the arena (fields of J.v, documented in jx.mito); constants of the filter are
+// entries below index 4096. The arena has one region per nesting depth of scopes: depth 0 (the document level) is never rewound,
+// depth d >= 1 is rewound when an element of a unit of that depth ends. Results that outlive an element (appended to a register of
+// an outer level) are copied into the register's region.
+//
+// run(e, v) runs the expression tree from node e with input v and hands each output on (the nx links, ending at the terminal of the
+// enclosing scope body: print, append to a register, fold). evs(e, v) evaluates an expression that has exactly one output.
+// Errors: a function returns -1 (or 1 from run) with jj.ev.err = 1 (a jq error, which `//` swallows) or 2 (not supported, fatal)
+// and the message in jj.err.
+
+fn ev_init() {
+    jj.v.ncon = 1;
+    jj.f.lits = "nullbooleannumberstringarrayobjectfalsetrue";
+    jj.ev.hnull = new_const(1, 0, 0, 0);
+    jj.ev.hfalse = new_const(2, 0, 0, 0);
+    jj.ev.htrue = new_const(3, 0, 0, 0);
+    jj.ev.htype[1] = new_const(5, 1, 0, 4);
+    jj.ev.htype[2] = new_const(5, 1, 4, 7);
+    jj.ev.htype[3] = new_const(5, 1, 11, 6);
+    jj.ev.htype[4] = new_const(5, 1, 17, 6);
+    jj.ev.htype[5] = new_const(5, 1, 23, 5);
+    jj.ev.htype[6] = new_const(5, 1, 28, 6);
+    var z = 0.0;
+    jj.ev.nanv = z / z;
+    jj.ev.harr0 = new_const(6, 1, -1, -1);
+    jj.v.base[1] = 4096;
+    jj.v.base[2] = 4096 + Lim.REG1;
+    jj.v.base[3] = 4096 + 2 * Lim.REG1;
+    jj.v.base[0] = 4096 + 3 * Lim.REG1;
+    var d = 0;
+    while d < 4 {
+        jj.v.top[d] = jj.v.base[d];
+        d += 1;
+    }
+    jj.v.cap[1] = jj.v.base[2];
+    jj.v.cap[2] = jj.v.base[3];
+    jj.v.cap[3] = jj.v.base[0];
+    jj.v.cap[0] = jj.v.base[0] + Lim.REG0;
+}
+
+fn fatal(msg: text) -> i64 {
+    jj.ev.err = 2;
+    jj.err = "jx: not supported in Stage 2: " + msg;
+    return -1;
+}
+
+fn jqerr(msg: text) -> i64 {
+    jj.ev.err = 1;
+    jj.err = "jx: error: " + msg;
+    return -1;
+}
+
+fn ar_alloc(d: i64) -> i64 {
+    let h = jj.v.top[d];
+    if h >= jj.v.cap[d] {
+        jj.ev.err = 2;
+        jj.err = "jx: out of value memory at nesting depth " + str(d) + " (the filter keeps more values than the arena holds)";
+        return -1;
+    }
+    jj.v.top[d] = h + 1;
+    return h;
+}
+
+fn ent(tag: i64, vs: i64, a: i64, b: i64) -> i64 {
+    let h = ar_alloc(jj.ev.depth);
+    if h < 0 { return -1; }
+    jj.v.vt[h] = tag;
+    jj.v.vs[h] = vs;
+    jj.v.va[h] = a;
+    jj.v.vb[h] = b;
+    jj.v.vf[h] = 0;
+    jj.v.vd[h] = -1;
+    jj.v.vn[h] = -1;
+    return h;
+}
+
+fn mk_dbl(x: f64) -> i64 {
+    let h = ent(4, 3, 0, 0);
+    if h < 0 { return -1; }
+    jj.v.vx[h] = x;
+    return h;
+}
+
+fn mk_bool(b: bool) -> i64 {
+    if b { return jj.ev.htrue; }
+    return jj.ev.hfalse;
+}
+
+fn truthy(h: i64) -> bool {
+    return jj.v.vt[h] >= 3;
+}
+
+fn type_idx(t: i64) -> i64 {
+    if t == 3 { return 2; }
+    if t >= 4 { return t - 1; }
+    return t;
+}
+
+fn type_name(h: i64) -> text {
+    return tag_name(jj.v.vt[h]);
+}
+
+fn tag_name(t: i64) -> text {
+    if t == 1 { return "null"; }
+    if t == 2 || t == 3 { return "boolean"; }
+    if t == 4 { return "number"; }
+    if t == 5 { return "string"; }
+    if t == 6 { return "array"; }
+    return "object";
+}
+
+// ---- slots as values ----
+
+// the first ancestor edge of node n that could not be navigated (the value above it was of the wrong type), else 0
+fn nav_check(n: i64) -> i64 {
+    if !jj.sc.anyerr { return 0; }
+    var c = n;
+    var bad = -1;
+    var tag = 0;
+    while jj.f.par[c] >= 0 {
+        let p = jj.f.par[c];
+        if jj.sc.serr[p] != 0 && jj.sc.serrg[p] == gen_of(p) { bad = c; tag = jj.sc.serr[p]; }
+        c = p;
+    }
+    if bad < 0 { return 0; }
+    let tn = tag_name(tag);
+    // the edge kind: a key or an index
+    var e = jj.f.nfirst[jj.f.par[bad]];
+    while e != 0 {
+        if jj.f.enode[e] == bad { break; }
+        e = jj.f.enext[e];
+    }
+    if e != 0 && jj.f.ekind[e] == 0 { return jqerr("Cannot index " + tn + " with \"" + substr(jj.f.keys, jj.f.ea[e], jj.f.eb[e]) + "\"") - 0; }
+    return jqerr("Cannot index " + tn + " with number");
+}
+
+// the value of node n's slot as an entry (null when it was not filled)
+fn slot_val(n: i64) -> i64 {
+    if jj.sc.sgen[n] != gen_of(n) { return jj.ev.hnull; }
+    let tag = jj.sc.stag[n];
+    if tag <= 3 {
+        if tag == 1 { return jj.ev.hnull; }
+        if tag == 2 { return jj.ev.hfalse; }
+        return jj.ev.htrue;
+    }
+    var h = -1;
+    if tag == 4 {
+        if jj.sc.sisint[n] != 0 { h = ent(4, 4, jj.sc.sint[n], 0); }
+        else { h = ent(4, 0, jj.sc.sa[n], jj.sc.sb[n]); }
+    } else if tag == 5 {
+        h = ent(5, 0, jj.sc.sa[n], jj.sc.sb[n]);
+        if h >= 0 { jj.v.vf[h] = jj.sc.sesc[n]; }
+    } else {
+        h = ent(tag, 0, jj.sc.sa[n], jj.sc.sb[n]);
+        if h >= 0 { jj.v.vf[h] = jj.sc.scnt[n]; jj.v.vd[h] = n; }
+    }
+    return h;
+}
+
+fn node_val(n: i64) -> i64 {
+    if jj.sc.anyerr { if nav_check(n) != 0 { return -1; } }
+    return slot_val(n);
+}
+
+// ---- strings ----
+
+// emit into a destination: 0 jj.tmp, 1 the output, 2 tmp2, 3 tmp3, 4 the scratch string
+fn put(dst: i64, t: text) {
+    if dst == 0 { jj.tmp += t; }
+    else if dst == 1 { jj.o.text += t; }
+    else if dst == 2 { jj.ev.tmp2 += t; }
+    else if dst == 3 { jj.ev.tmp3 += t; }
+    else { jj.ev.scr += t; }
+}
+
+fn clear_dst(dst: i64) {
+    if dst == 0 { jj.tmp = ""; }
+    else if dst == 2 { jj.ev.tmp2 = ""; }
+    else if dst == 3 { jj.ev.tmp3 = ""; }
+}
+
+// the plain bytes of string entry h, into the destination (cleared first for the temporaries); the length
+fn str_plain(doc: text, h: i64, dst: i64) -> i64 {
+    clear_dst(dst);
+    let s = jj.v.vs[h];
+    let a = jj.v.va[h];
+    let b = jj.v.vb[h];
+    if s == 0 {
+        if jj.v.vf[h] == 0 { put(dst, substr(doc, a + 1, b - a - 2)); return b - a - 2; }
+        decode_to(doc, a, b, dst);
+    } else if s == 1 { put(dst, substr(jj.f.lits, a, b)); return b; }
+    else if s == 2 { put(dst, substr(jj.ev.scr, a, b)); return b; }
+    else { put(dst, substr(jj.ev.ptx, a, b)); return b; }
+    if dst == 0 { return len(jj.tmp); }
+    if dst == 2 { return len(jj.ev.tmp2); }
+    return len(jj.ev.tmp3);
+}
+
+// compare strings x and y (entries): -1, 0, 1 by bytes of their plain forms
+fn str_cmp(doc: text, x: i64, y: i64) -> i64 {
+    let nx = str_plain(doc, x, 0);
+    let ny = str_plain(doc, y, 2);
+    return bytes_cmp(jj.tmp, 0, nx, jj.ev.tmp2, 0, ny);
+}
+
+// a new string entry from the plain bytes in jj.tmp, kept in the scratch string
+fn str_from_tmp() -> i64 {
+    let n = len(jj.tmp);
+    if len(jj.ev.scr) + n > 16000000 { return fatal("strings built by the filter exceed the 16 MB scratch string"); }
+    let off = len(jj.ev.scr);
+    jj.ev.scr += jj.tmp;
+    return ent(5, 2, off, n);
+}
+
+// ---- numbers ----
+
+fn numd(doc: text, filter: text, h: i64) -> f64 {
+    let s = jj.v.vs[h];
+    var x = 0.0;
+    if s == 4 { x = jj.v.va[h] as f64; }
+    else if s == 3 { return jj.v.vx[h]; }
+    else if s == 0 { x = num_parse(doc, jj.v.va[h], jj.v.vb[h]); }
+    else { x = num_parse(filter, jj.v.va[h], jj.v.vb[h]); }
+    let f = jj.v.vf[h];
+    if (f & 2) != 0 { if x < 0.0 { x = -x; } return x; }
+    if (f & 1) != 0 { x = -x; }
+    return x;
+}
+
+// the text of a literal number entry into dst (jj.tmp or tmp2)
+fn lit_text(doc: text, filter: text, h: i64, dst: i64) {
+    clear_dst(dst);
+    let s = jj.v.vs[h];
+    if s == 4 { put(dst, str(jj.v.va[h])); }
+    else if s == 0 { put(dst, substr(doc, jj.v.va[h], jj.v.vb[h] - jj.v.va[h])); }
+    else { put(dst, substr(filter, jj.v.va[h], jj.v.vb[h] - jj.v.va[h])); }
+}
+
+fn is_lit(h: i64) -> bool {
+    return jj.v.vs[h] != 3 && jj.v.vf[h] == 0;
+}
+
+// the order of two numbers as jq has it: exact on two literals, by double otherwise; nan is below everything
+fn num_cmp3(doc: text, filter: text, x: i64, y: i64) -> i64 {
+    if is_lit(x) && is_lit(y) {
+        if jj.v.vs[x] == 4 && jj.v.vs[y] == 4 {
+            if jj.v.va[x] < jj.v.va[y] { return -1; }
+            if jj.v.va[x] > jj.v.va[y] { return 1; }
+            return 0;
+        }
+        lit_text(doc, filter, x, 0);
+        lit_text(doc, filter, y, 2);
+        return num_cmp(jj.tmp, 0, len(jj.tmp), jj.ev.tmp2, 0, len(jj.ev.tmp2));
+    }
+    let a = numd(doc, filter, x);
+    let b = numd(doc, filter, y);
+    if a != a { return -1; }
+    if b != b { return 1; }
+    if a < b { return -1; }
+    if a > b { return 1; }
+    return 0;
+}
+
+// ---- comparison ----
+
+// jq's order: -1, 0, 1; -2 when it cannot be decided (error set)
+fn cmp_vals(doc: text, filter: text, x: i64, y: i64) -> i64 {
+    let tx = jj.v.vt[x];
+    let ty = jj.v.vt[y];
+    if tx != ty { if tx < ty { return -1; } return 1; }
+    if tx <= 3 { return 0; }
+    if tx == 4 { return num_cmp3(doc, filter, x, y); }
+    if tx == 5 { return str_cmp(doc, x, y); }
+    if jj.v.vs[x] != 1 || jj.v.vs[y] != 1 {
+        fatal("comparing arrays or objects taken from the document (they are not parsed)");
+        return -2;
+    }
+    if tx == 7 {
+        fatal("comparing objects");
+        return -2;
+    }
+    var px = jj.v.va[x];
+    var py = jj.v.va[y];
+    while px >= 0 && py >= 0 {
+        let c = cmp_vals(doc, filter, px, py);
+        if c != 0 { return c; }
+        px = jj.v.vn[px];
+        py = jj.v.vn[py];
+    }
+    if px < 0 && py < 0 { return 0; }
+    if px < 0 { return -1; }
+    return 1;
+}
+
+// ---- registers and copies ----
+
+fn reg_gen(r: i64) -> i64 {
+    let ow = jj.f.r_own[r];
+    if ow < 0 { return 1; }
+    return jj.sc.ugen[ow];
+}
+
+// a register used while its owner element is current: reset when the element changed
+fn reg_touch(r: i64) {
+    let g = reg_gen(r);
+    if jj.ev.rg[r] != g {
+        jj.ev.rg[r] = g;
+        jj.ev.rh[r] = -1;
+        jj.ev.rt[r] = -1;
+        jj.ev.rc[r] = 0;
+        jj.ev.rerr[r] = 0;
+        jj.ev.at[r] = 0;
+        jj.ev.ax[r] = 0.0;
+    }
+}
+
+fn reg_clear(r: i64) {
+    jj.ev.rg[r] = reg_gen(r);
+    jj.ev.rh[r] = -1;
+    jj.ev.rt[r] = -1;
+    jj.ev.rc[r] = 0;
+    jj.ev.rerr[r] = 0;
+    jj.ev.at[r] = 0;
+    jj.ev.ax[r] = 0.0;
+}
+
+// a copy of entry h in the arena of depth d, with what it holds (a string of the scratch string moves to the persistent text)
+fn copy_deep(h: i64, d: i64) -> i64 {
+    let t = jj.v.vt[h];
+    if t <= 3 { return h; }
+    let save = jj.ev.depth;
+    jj.ev.depth = d;
+    var n = ent(t, jj.v.vs[h], jj.v.va[h], jj.v.vb[h]);
+    jj.ev.depth = save;
+    if n < 0 { return -1; }
+    jj.v.vf[n] = jj.v.vf[h];
+    jj.v.vx[n] = jj.v.vx[h];
+    if t == 5 && jj.v.vs[h] == 2 {
+        let off = len(jj.ev.ptx);
+        if off + jj.v.vb[h] > 268000000 { return fatal("strings kept by the filter exceed the persistent text (256 MB)"); }
+        jj.ev.ptx += substr(jj.ev.scr, jj.v.va[h], jj.v.vb[h]);
+        jj.v.vs[n] = 3;
+        jj.v.va[n] = off;
+    }
+    if t >= 6 && jj.v.vs[h] == 1 {
+        // a built container: copy the chain
+        var p = jj.v.va[h];
+        var first = -1;
+        var last = -1;
+        while p >= 0 {
+            var c = -1;
+            if t == 6 {
+                c = copy_deep(p, d);
+                if c < 0 { return -1; }
+                if c == p || jj.v.vt[c] <= 3 {
+                    // a constant: the chain needs its own entry
+                    let save2 = jj.ev.depth;
+                    jj.ev.depth = d;
+                    let c2 = ent(jj.v.vt[p], 0, 0, 0);
+                    jj.ev.depth = save2;
+                    if c2 < 0 { return -1; }
+                    c = c2;
+                } else {
+                    // copy_deep made a fresh entry; it is its own chain link
+                }
+            } else {
+                let save3 = jj.ev.depth;
+                jj.ev.depth = d;
+                c = ent(0, 0, 0, 0);
+                jj.ev.depth = save3;
+                if c < 0 { return -1; }
+                let kk = copy_deep(jj.v.va[p], d);
+                let vv = copy_deep(jj.v.vb[p], d);
+                if kk < 0 || vv < 0 { return -1; }
+                jj.v.va[c] = kk;
+                jj.v.vb[c] = vv;
+            }
+            jj.v.vn[c] = -1;
+            if last >= 0 { jj.v.vn[last] = c; } else { first = c; }
+            last = c;
+            p = jj.v.vn[p];
+        }
+        jj.v.va[n] = first;
+        jj.v.vb[n] = last;
+    }
+    if t >= 6 && jj.v.vs[h] == 0 { jj.v.vd[n] = -1; }
+    jj.v.vn[n] = -1;
+    return n;
+}
+
+// the next code that handles an element of a list: copy the entry into the arena of depth d, as the next link of register r
+fn append_reg(r: i64, h: i64, d: i64) -> i64 {
+    reg_touch(r);
+    var c = -1;
+    let t = jj.v.vt[h];
+    if t <= 3 {
+        let save = jj.ev.depth;
+        jj.ev.depth = d;
+        c = ent(t, 0, 0, 0);
+        jj.ev.depth = save;
+    } else if t == 4 || (t == 5 && jj.v.vs[h] != 2) || (t >= 6 && jj.v.vs[h] == 0) {
+        let save = jj.ev.depth;
+        jj.ev.depth = d;
+        c = ent(t, jj.v.vs[h], jj.v.va[h], jj.v.vb[h]);
+        jj.ev.depth = save;
+        if c >= 0 {
+            jj.v.vf[c] = jj.v.vf[h];
+            jj.v.vx[c] = jj.v.vx[h];
+            jj.v.vd[c] = -1;
+        }
+    } else {
+        c = copy_deep(h, d);
+        if c >= 0 && c == h { return fatal("internal: a shared entry in a list"); }
+    }
+    if c < 0 { return -1; }
+    jj.v.vn[c] = -1;
+    if jj.ev.rt[r] >= 0 { jj.v.vn[jj.ev.rt[r]] = c; } else { jj.ev.rh[r] = c; }
+    jj.ev.rt[r] = c;
+    jj.ev.rc[r] += 1;
+    return 0;
+}
+
+// the list held by register r as a value
+fn reg_list(r: i64) -> i64 {
+    reg_touch(r);
+    if jj.ev.rc[r] == 0 { return jj.ev.harr0; }
+    let h = ent(6, 1, jj.ev.rh[r], jj.ev.rt[r]);
+    if h < 0 { return -1; }
+    jj.v.vf[h] = jj.ev.rc[r];
+    return h;
+}
+
+// ---- arithmetic ----
+
+fn add_vals(doc: text, filter: text, x: i64, y: i64) -> i64 {
+    let tx = jj.v.vt[x];
+    let ty = jj.v.vt[y];
+    if tx == 1 { return y; }
+    if ty == 1 { return x; }
+    if tx == 4 && ty == 4 { return mk_dbl(numd(doc, filter, x) + numd(doc, filter, y)); }
+    if tx == 5 && ty == 5 {
+        let nx = str_plain(doc, x, 0);
+        str_plain(doc, y, 2);
+        let off = len(jj.ev.scr);
+        if off + nx + len(jj.ev.tmp2) > 16000000 { return fatal("strings built by the filter exceed the 16 MB scratch string"); }
+        jj.ev.scr += jj.tmp;
+        jj.ev.scr += jj.ev.tmp2;
+        return ent(5, 2, off, nx + len(jj.ev.tmp2));
+    }
+    if tx == 6 && ty == 6 {
+        if jj.v.vs[x] != 1 || jj.v.vs[y] != 1 { return fatal("adding arrays taken from the document"); }
+        let r = ent(6, 1, -1, -1);
+        if r < 0 { return -1; }
+        var first = -1;
+        var last = -1;
+        var side = 0;
+        while side < 2 {
+            var p = jj.v.va[x];
+            if side == 1 { p = jj.v.va[y]; }
+            while p >= 0 {
+                let c = ent(jj.v.vt[p], jj.v.vs[p], jj.v.va[p], jj.v.vb[p]);
+                if c < 0 { return -1; }
+                jj.v.vf[c] = jj.v.vf[p];
+                jj.v.vx[c] = jj.v.vx[p];
+                jj.v.vd[c] = jj.v.vd[p];
+                if last >= 0 { jj.v.vn[last] = c; } else { first = c; }
+                last = c;
+                p = jj.v.vn[p];
+            }
+            side += 1;
+        }
+        jj.v.va[r] = first;
+        jj.v.vb[r] = last;
+        jj.v.vf[r] = jj.v.vf[x] + jj.v.vf[y];
+        return r;
+    }
+    if tx == 7 && ty == 7 {
+        return fatal("adding objects");
+    }
+    return jqerr(type_name(x) + " and " + type_name(y) + " cannot be added");
+}
+
+fn dtoi(x: f64) -> i64 {
+    if x >= 9223372036854775807.0 { return 9223372036854775807; }
+    if x <= -9223372036854775807.0 { return -9223372036854775807 - 1; }
+    return x as i64;
+}
+
+// x op y for + - * / %
+fn arith(doc: text, filter: text, op: i64, x: i64, y: i64) -> i64 {
+    if op == 21 { return add_vals(doc, filter, x, y); }
+    let tx = jj.v.vt[x];
+    let ty = jj.v.vt[y];
+    if tx == 4 && ty == 4 {
+        let a = numd(doc, filter, x);
+        let b = numd(doc, filter, y);
+        if op == 22 { return mk_dbl(a - b); }
+        if op == 23 { return mk_dbl(a * b); }
+        if op == 24 {
+            if b == 0.0 { return jqerr("number and number cannot be divided because the divisor is zero"); }
+            return mk_dbl(a / b);
+        }
+        if a != a || b != b { return mk_dbl(jj.ev.nanv); }
+        let ia = dtoi(a);
+        let ib = dtoi(b);
+        if ib == 0 { return jqerr("number and number cannot be divided (remainder) because the divisor is zero"); }
+        if ib == -1 { return mk_dbl(0.0); }
+        return mk_dbl((ia % ib) as f64);
+    }
+    if op == 22 && tx == 6 && ty == 6 {
+        if jj.v.vs[x] != 1 || jj.v.vs[y] != 1 { return fatal("subtracting arrays taken from the document"); }
+        let r = ent(6, 1, -1, -1);
+        if r < 0 { return -1; }
+        var first = -1;
+        var last = -1;
+        var cnt = 0;
+        var p = jj.v.va[x];
+        while p >= 0 {
+            var found = false;
+            var q = jj.v.va[y];
+            while q >= 0 && !found {
+                let c = cmp_vals(doc, filter, p, q);
+                if c == -2 { return -1; }
+                if c == 0 { found = true; }
+                q = jj.v.vn[q];
+            }
+            if !found {
+                let c = ent(jj.v.vt[p], jj.v.vs[p], jj.v.va[p], jj.v.vb[p]);
+                if c < 0 { return -1; }
+                jj.v.vf[c] = jj.v.vf[p];
+                jj.v.vx[c] = jj.v.vx[p];
+                jj.v.vd[c] = jj.v.vd[p];
+                if last >= 0 { jj.v.vn[last] = c; } else { first = c; }
+                last = c;
+                cnt += 1;
+            }
+            p = jj.v.vn[p];
+        }
+        jj.v.va[r] = first;
+        jj.v.vb[r] = last;
+        jj.v.vf[r] = cnt;
+        return r;
+    }
+    if op == 23 && ((tx == 5 && ty == 4) || (tx == 4 && ty == 5) || (tx == 7 && ty == 7)) { return fatal("`*` on strings or objects"); }
+    if op == 24 && tx == 5 && ty == 5 { return fatal("`/` on strings (split)"); }
+    return jqerr(type_name(x) + " and " + type_name(y) + " cannot be " + op_word(op));
+}
+
+fn op_word(op: i64) -> text {
+    if op == 22 { return "subtracted"; }
+    if op == 23 { return "multiplied"; }
+    if op == 24 { return "divided"; }
+    return "divided (remainder)";
+}
+
+fn neg_val(doc: text, filter: text, x: i64) -> i64 {
+    if jj.v.vt[x] != 4 { return jqerr(type_name(x) + " cannot be negated"); }
+    let s = jj.v.vs[x];
+    if s == 4 { return ent(4, 4, -jj.v.va[x], 0); }
+    if s == 3 { return mk_dbl(-jj.v.vx[x]); }
+    let h = ent(4, s, jj.v.va[x], jj.v.vb[x]);
+    if h < 0 { return -1; }
+    jj.v.vf[h] = jj.v.vf[x] ^ 1;
+    if (jj.v.vf[x] & 2) != 0 { jj.v.vf[h] = jj.v.vf[x]; return mk_dbl(-numd(doc, filter, x)); }
+    return h;
+}
+
+// ---- navigation ----
+
+fn find_child_key(node: i64, ko: i64, kl: i64) -> i64 {
+    var e = jj.f.nfirst[node];
+    while e != 0 {
+        if jj.f.ekind[e] == 0 && jj.f.eb[e] == kl && substr(jj.f.keys, jj.f.ea[e], kl) == substr(jj.f.keys, ko, kl) { return jj.f.enode[e]; }
+        e = jj.f.enext[e];
+    }
+    return -1;
+}
+
+fn find_child_idx(node: i64, k: i64) -> i64 {
+    var e = jj.f.nfirst[node];
+    while e != 0 {
+        if jj.f.ekind[e] == 1 && jj.f.ea[e] == k { return jj.f.enode[e]; }
+        e = jj.f.enext[e];
+    }
+    return -1;
+}
+
+// the value under the key keys[ko, ko+kl) of an object value, null when missing
+fn nav_key(doc: text, v: i64, ko: i64, kl: i64) -> i64 {
+    let t = jj.v.vt[v];
+    if t == 1 { return jj.ev.hnull; }
+    if t != 7 { return jqerr("Cannot index " + type_name(v) + " with \"" + substr(jj.f.keys, ko, kl) + "\""); }
+    if jj.v.vs[v] == 0 {
+        let nd = jj.v.vd[v];
+        if nd < 0 { return fatal("indexing an object taken from the document that was not read for this (a path inside a collected value)"); }
+        let c = find_child_key(nd, ko, kl);
+        if c < 0 { return fatal("indexing an object taken from the document that was not read for this (a path after `if`, `//` or a collected value)"); }
+        return node_val(c);
+    }
+    var p = jj.v.va[v];
+    var found = -1;
+    while p >= 0 {
+        let kh = jj.v.va[p];
+        let n = str_plain(doc, kh, 0);
+        if n == kl && substr(jj.tmp, 0, n) == substr(jj.f.keys, ko, kl) { found = jj.v.vb[p]; }
+        p = jj.v.vn[p];
+    }
+    if found < 0 { return jj.ev.hnull; }
+    return found;
+}
+
+fn nav_idx(doc: text, v: i64, k: i64) -> i64 {
+    let t = jj.v.vt[v];
+    if t == 1 { return jj.ev.hnull; }
+    if t != 6 { return jqerr("Cannot index " + type_name(v) + " with number"); }
+    if jj.v.vs[v] == 0 {
+        let nd = jj.v.vd[v];
+        if nd < 0 { return fatal("indexing an array taken from the document that was not read for this (a path inside a collected value)"); }
+        let c = find_child_idx(nd, k);
+        if c < 0 { return fatal("indexing an array taken from the document that was not read for this (a path after `if`, `//` or a collected value)"); }
+        return node_val(c);
+    }
+    if k >= jj.v.vf[v] { return jj.ev.hnull; }
+    var p = jj.v.va[v];
+    var i = 0;
+    while i < k { p = jj.v.vn[p]; i += 1; }
+    return p;
+}
+
+// ---- builtins on one value ----
+
+fn length_of(doc: text, filter: text, v: i64) -> i64 {
+    let t = jj.v.vt[v];
+    if t == 1 { return ent(4, 4, 0, 0); }
+    if t == 2 || t == 3 { return jqerr("boolean has no length"); }
+    if t == 4 {
+        let s = jj.v.vs[v];
+        if s == 4 { var a = jj.v.va[v]; if a < 0 { a = -a; } return ent(4, 4, a, 0); }
+        if s == 3 { var x = jj.v.vx[v]; if x < 0.0 { x = -x; } return mk_dbl(x); }
+        let h = ent(4, s, jj.v.va[v], jj.v.vb[v]);
+        if h < 0 { return -1; }
+        jj.v.vf[h] = 2;
+        return h;
+    }
+    if t == 5 {
+        let n = str_plain(doc, v, 0);
+        var c = 0;
+        var i = 0;
+        while i < n {
+            if (byte_at(jj.tmp, i) & 192) != 128 { c += 1; }
+            i += 1;
+        }
+        return ent(4, 4, c, 0);
+    }
+    return ent(4, 4, jj.v.vf[v], 0);
+}
+
+fn keys_of(doc: text, filter: text, v: i64) -> i64 {
+    let t = jj.v.vt[v];
+    if t == 6 {
+        let n = jj.v.vf[v];
+        let r = ent(6, 1, -1, -1);
+        if r < 0 { return -1; }
+        var last = -1;
+        var i = 0;
+        while i < n {
+            let c = ent(4, 4, i, 0);
+            if c < 0 { return -1; }
+            if last >= 0 { jj.v.vn[last] = c; } else { jj.v.va[r] = c; }
+            last = c;
+            i += 1;
+        }
+        jj.v.vb[r] = last;
+        jj.v.vf[r] = n;
+        if n == 0 { return jj.ev.harr0; }
+        return r;
+    }
+    if t != 7 { return jqerr(type_name(v) + " has no keys"); }
+    // collect the key entries, then order them by their text
+    var first = -1;
+    var cnt = 0;
+    if jj.v.vs[v] == 0 {
+        let nd = jj.v.vd[v];
+        if nd < 0 || jj.f.wantkeys[nd] == 0 { return fatal("keys of an object taken from the document that was not read for this"); }
+        first = jj.sc.skh[nd];
+        cnt = jj.sc.skn[nd];
+    } else {
+        first = -1;
+        cnt = jj.v.vf[v];
+    }
+    // an array of handles sorted by insertion
+    var n = 0;
+    var p = first;
+    if jj.v.vs[v] == 1 { p = jj.v.va[v]; }
+    while p >= 0 {
+        var kh = p;
+        if jj.v.vs[v] == 1 { kh = jj.v.va[p]; }
+        if n >= 60 { return fatal("`keys` of an object with more than 60 keys"); }
+        // insert in order
+        var pos = n;
+        while pos > 0 {
+            let c = str_cmp(doc, jj.ev.stk[pos - 1], kh);
+            if c <= 0 { break; }
+            jj.ev.stk[pos] = jj.ev.stk[pos - 1];
+            pos -= 1;
+        }
+        jj.ev.stk[pos] = kh;
+        n += 1;
+        if jj.v.vs[v] == 1 { p = jj.v.vn[p]; } else { p = jj.v.vn[p]; }
+    }
+    let r = ent(6, 1, -1, -1);
+    if r < 0 { return -1; }
+    var last = -1;
+    var i = 0;
+    var kept = 0;
+    while i < n {
+        let kh = jj.ev.stk[i];
+        var dup = false;
+        if i > 0 { if str_cmp(doc, jj.ev.stk[i - 1], kh) == 0 { dup = true; } }
+        if !dup {
+            let c = ent(5, jj.v.vs[kh], jj.v.va[kh], jj.v.vb[kh]);
+            if c < 0 { return -1; }
+            jj.v.vf[c] = jj.v.vf[kh];
+            if last >= 0 { jj.v.vn[last] = c; } else { jj.v.va[r] = c; }
+            last = c;
+            kept += 1;
+        }
+        i += 1;
+    }
+    jj.v.vb[r] = last;
+    jj.v.vf[r] = kept;
+    if kept == 0 { return jj.ev.harr0; }
+    return r;
+}
+
+fn has_of(doc: text, filter: text, v: i64, a: i64) -> i64 {
+    let t = jj.v.vt[v];
+    let ta = jj.v.vt[a];
+    if t == 7 && ta == 5 {
+        if jj.v.vs[v] == 0 {
+            let nd = jj.v.vd[v];
+            if nd < 0 { return fatal("`has` on an object taken from the document that was not read for this"); }
+            let n = str_plain(doc, a, 0);
+            let ko = len(jj.f.keys);
+            // look the key up among the node's children by text
+            var e = jj.f.nfirst[nd];
+            while e != 0 {
+                if jj.f.ekind[e] == 0 && jj.f.eb[e] == n && substr(jj.f.keys, jj.f.ea[e], n) == substr(jj.tmp, 0, n) {
+                    let c = jj.f.enode[e];
+                    return mk_bool(jj.sc.sgen[c] == gen_of(c));
+                }
+                e = jj.f.enext[e];
+            }
+            return fatal("`has` with a key that was not read for this");
+        }
+        var p = jj.v.va[v];
+        while p >= 0 {
+            if str_cmp(doc, jj.v.va[p], a) == 0 { return jj.ev.htrue; }
+            p = jj.v.vn[p];
+        }
+        return jj.ev.hfalse;
+    }
+    if t == 6 && ta == 4 {
+        let x = numd(doc, filter, a);
+        if x != x { return jj.ev.hfalse; }
+        var c = jj.v.vf[v];
+        return mk_bool(x >= 0.0 && x < (c as f64));
+    }
+    return jqerr("Cannot check whether " + type_name(v) + " has a " + type_name(a) + " key");
+}
+
+fn tostring_of(doc: text, filter: text, v: i64) -> i64 {
+    let t = jj.v.vt[v];
+    if t == 5 { return v; }
+    if t == 1 { return ent(5, 1, 0, 4); }
+    if t == 2 { return ent(5, 1, 34, 5); }
+    if t == 3 { return ent(5, 1, 39, 4); }
+    if t == 4 {
+        let s = jj.v.vs[v];
+        jj.tmp = "";
+        if s == 4 { jj.tmp += str(jj.v.va[v]); }
+        else if s == 3 { fmt_dbl(jj.v.vx[v]); jj.tmp += jj.num.buf; }
+        else {
+            // the literal in jq's canonical form
+            jj.o.to = 4;
+            let m = len(jj.ev.scr);
+            var mode = 0;
+            if (jj.v.vf[v] & 2) != 0 { mode = 1; } else if (jj.v.vf[v] & 1) != 0 { mode = 2; }
+            if s == 0 { write_number(doc, jj.v.va[v], jj.v.vb[v], mode); } else { write_number(filter, jj.v.va[v], jj.v.vb[v], mode); }
+            jj.o.to = 0;
+            return ent(5, 2, m, len(jj.ev.scr) - m);
+        }
+        return str_from_tmp();
+    }
+    return fatal("`tostring` of an array or object");
+}
+
+fn tonumber_of(doc: text, filter: text, v: i64) -> i64 {
+    let t = jj.v.vt[v];
+    if t == 4 { return v; }
+    if t != 5 { return jqerr(type_name(v) + " cannot be parsed as a number"); }
+    let n = str_plain(doc, v, 0);
+    // [+-]? digits* [. digits*] [e [+-] digits+]?  with at least one digit
+    var i = 0;
+    var neg = false;
+    if n > 0 && byte_at(jj.tmp, 0) == 45 { neg = true; i = 1; }
+    else if n > 0 && byte_at(jj.tmp, 0) == 43 { i = 1; }
+    var nd = 0;
+    var strict = true;
+    var lead0 = false;
+    if i < n && byte_at(jj.tmp, i) == 48 && i + 1 < n && is_digit(byte_at(jj.tmp, i + 1)) { lead0 = true; }
+    if byte_at(jj.tmp, 0) == 43 { strict = false; }
+    if lead0 { strict = false; }
+    while i < n && is_digit(byte_at(jj.tmp, i)) { i += 1; nd += 1; }
+    if i < n && byte_at(jj.tmp, i) == 46 {
+        i += 1;
+        var fd = 0;
+        while i < n && is_digit(byte_at(jj.tmp, i)) { i += 1; nd += 1; fd += 1; }
+        if fd == 0 { strict = false; }
+        if nd == fd && fd > 0 { strict = false; }
+    }
+    if nd == 0 { return jqerr("string cannot be parsed as a number"); }
+    if i < n && (byte_at(jj.tmp, i) == 101 || byte_at(jj.tmp, i) == 69) {
+        i += 1;
+        if i < n && (byte_at(jj.tmp, i) == 43 || byte_at(jj.tmp, i) == 45) { i += 1; }
+        var ed = 0;
+        while i < n && is_digit(byte_at(jj.tmp, i)) { i += 1; ed += 1; }
+        if ed == 0 { return jqerr("string cannot be parsed as a number"); }
+    }
+    if i != n { return jqerr("string cannot be parsed as a number"); }
+    // a plain JSON number from the document keeps its literal form
+    if strict && jj.v.vs[v] == 0 && jj.v.vf[v] == 0 {
+        let a = jj.v.va[v] + 1;
+        let b = jj.v.vb[v] - 1;
+        return number_lit_doc(doc, a, b);
+    }
+    var x = 0.0;
+    if strict { x = num_parse(jj.tmp, 0, n); }
+    else {
+        // rewrite without the plus sign and with the digits as they are: num_parse reads leading zeros and a bare dot
+        var s0 = 0;
+        if byte_at(jj.tmp, 0) == 43 { s0 = 1; }
+        if byte_at(jj.tmp, 0) == 45 { s0 = 1; }
+        jj.ev.tmp3 = "";
+        if neg { jj.ev.tmp3 += "-"; }
+        jj.ev.tmp3 += substr(jj.tmp, s0, n - s0);
+        x = num_parse(jj.ev.tmp3, 0, len(jj.ev.tmp3));
+    }
+    return mk_dbl(x);
+}
+
+// a number entry for the literal at [a, b) of the document
+fn number_lit_doc(doc: text, a: i64, b: i64) -> i64 {
+    var n = 0;
+    var k = a;
+    var plain = (b - a) <= 15;
+    while k < b && plain {
+        let c = byte_at(doc, k);
+        if !is_digit(c) { plain = false; } else { n = n * 10 + c - 48; }
+        k += 1;
+    }
+    if plain { return ent(4, 4, n, 0); }
+    return ent(4, 0, a, b);
+}
+
+fn math_of(doc: text, filter: text, id: i64, v: i64) -> i64 {
+    if jj.v.vt[v] != 4 { return jqerr(type_name(v) + " number required"); }
+    let x = numd(doc, filter, v);
+    if id == F.FLOOR { return mk_dbl(floor(x)); }
+    if id == F.CEIL { return mk_dbl(ceil(x)); }
+    if id == F.ROUND { return mk_dbl(round(x)); }
+    if id == F.SQRT { return mk_dbl(sqrt(x)); }
+    return mk_dbl(abs(x));
+}
+
+// add over the elements of a built list
+fn add_list(doc: text, filter: text, v: i64) -> i64 {
+    let t = jj.v.vt[v];
+    if t == 1 { return jqerr("Cannot iterate over null"); }
+    if t != 6 && t != 7 { return jqerr("Cannot iterate over " + type_name(v)); }
+    if jj.v.vs[v] == 0 { return fatal("`add` on a value taken from the document that was not read for this"); }
+    var acc = jj.ev.hnull;
+    var p = jj.v.va[v];
+    while p >= 0 {
+        var x = p;
+        if t == 7 { x = jj.v.vb[p]; }
+        acc = add_vals(doc, filter, acc, x);
+        if acc < 0 { return -1; }
+        p = jj.v.vn[p];
+    }
+    return acc;
+}
+
+// ---- folds ----
+
+fn fold_add(doc: text, filter: text, r: i64, h: i64) -> i64 {
+    reg_touch(r);
+    let t = jj.v.vt[h];
+    if t == 1 { return 0; }
+    let st = jj.ev.at[r];
+    if st == 0 {
+        let c = copy_deep(h, jj.f.r_depth[r]);
+        if c < 0 { return 1; }
+        if c == h {
+            // a constant can be held as is
+        }
+        jj.ev.ah[r] = c;
+        jj.ev.at[r] = 1;
+        return 0;
+    }
+    if st == 2 {
+        if t != 4 { jqerr("number and " + type_name(h) + " cannot be added"); return 1; }
+        jj.ev.ax[r] = jj.ev.ax[r] + numd(doc, filter, h);
+        return 0;
+    }
+    let a = jj.ev.ah[r];
+    if jj.v.vt[a] == 4 && t == 4 {
+        jj.ev.ax[r] = numd(doc, filter, a) + numd(doc, filter, h);
+        jj.ev.at[r] = 2;
+        return 0;
+    }
+    let sum = add_vals(doc, filter, a, h);
+    if sum < 0 { return 1; }
+    let c = copy_deep(sum, jj.f.r_depth[r]);
+    if c < 0 { return 1; }
+    jj.ev.ah[r] = c;
+    return 0;
+}
+
+fn fold_result(r: i64, kind: i64) -> i64 {
+    reg_touch(r);
+    if kind == 2 { return ent(4, 4, jj.ev.rc[r], 0); }
+    if jj.ev.at[r] == 0 { return jj.ev.hnull; }
+    if jj.ev.at[r] == 1 { return jj.ev.ah[r]; }
+    return mk_dbl(jj.ev.ax[r]);
+}
+
+// ---- the evaluator ----
+
+fn cmp_result(op: i64, c: i64) -> bool {
+    if op == 11 { return c == 0; }
+    if op == 12 { return c != 0; }
+    if op == 13 { return c < 0; }
+    if op == 14 { return c <= 0; }
+    if op == 15 { return c > 0; }
+    return c >= 0;
+}
+
+// a number or string slot against a literal, without making entries
+fn cmplit(doc: text, filter: text, n: i64, lit: i64, op: i64) -> i64 {
+    if jj.sc.anyerr { if nav_check(n) != 0 { return -1; } }
+    var tag = 1;
+    var c = 0;
+    if jj.sc.sgen[n] == gen_of(n) { tag = jj.sc.stag[n]; }
+    let lt = jj.v.vt[lit];
+    if tag != lt {
+        if tag < lt { c = -1; } else { c = 1; }
+        return mk_bool(cmp_result(op, c));
+    }
+    if tag == 4 {
+        if jj.sc.sisint[n] != 0 && jj.v.vs[lit] == 4 && jj.v.vf[lit] == 0 {
+            let a = jj.sc.sint[n];
+            let b = jj.v.va[lit];
+            if a < b { c = -1; } else if a > b { c = 1; }
+            return mk_bool(cmp_result(op, c));
+        }
+        let h = slot_val(n);
+        if h < 0 { return -1; }
+        c = num_cmp3(doc, filter, h, lit);
+        return mk_bool(cmp_result(op, c));
+    }
+    if tag == 5 {
+        let a = jj.sc.sa[n];
+        let b = jj.sc.sb[n];
+        if jj.sc.sesc[n] == 0 {
+            c = bytes_cmp(doc, a + 1, b - a - 2, jj.f.lits, jj.v.va[lit], jj.v.vb[lit]);
+        } else {
+            decode_string(doc, a, b);
+            c = bytes_cmp(jj.tmp, 0, len(jj.tmp), jj.f.lits, jj.v.va[lit], jj.v.vb[lit]);
+        }
+        return mk_bool(cmp_result(op, c));
+    }
+    if tag >= 6 {
+        let h = slot_val(n);
+        if h < 0 { return -1; }
+        c = cmp_vals(doc, filter, h, lit);
+        if c == -2 { return -1; }
+        return mk_bool(cmp_result(op, c));
+    }
+    return mk_bool(cmp_result(op, 0));
+}
+
+fn eval_obj(doc: text, filter: text, e: i64, v: i64) -> i64 {
+    let r = ent(7, 1, -1, -1);
+    if r < 0 { return -1; }
+    var cnt = 0;
+    var i = 0;
+    let first = jj.f.aa[e];
+    while i < jj.f.ab[e] {
+        let kx = evs(doc, filter, jj.f.okey[first + i], v);
+        if kx < 0 { return -1; }
+        if jj.v.vt[kx] != 5 { return jqerr("Object keys must be strings"); }
+        let vx = evs(doc, filter, jj.f.oval[first + i], v);
+        if vx < 0 { return -1; }
+        // an existing key: the value is replaced in place
+        var p = jj.v.va[r];
+        var done = false;
+        while p >= 0 && !done {
+            if str_cmp(doc, jj.v.va[p], kx) == 0 { jj.v.vb[p] = vx; done = true; }
+            p = jj.v.vn[p];
+        }
+        if !done {
+            let pe = ent(0, 0, kx, vx);
+            if pe < 0 { return -1; }
+            if jj.v.vb[r] >= 0 { jj.v.vn[jj.v.vb[r]] = pe; } else { jj.v.va[r] = pe; }
+            jj.v.vb[r] = pe;
+            cnt += 1;
+        }
+        i += 1;
+    }
+    jj.v.vf[r] = cnt;
+    return r;
+}
+
+// the value of an expression with exactly one output; -1 on error
+fn evs(doc: text, filter: text, e: i64, v: i64) -> i64 {
+    let k = jj.f.ak[e];
+    if k == K.NODE { return node_val(jj.f.aa[e]); }
+    if k == K.ID { return v; }
+    if k == K.LIT { return jj.f.aa[e]; }
+    if k == K.CMPLIT { return cmplit(doc, filter, jj.f.aa[e], jj.f.ab[e], jj.f.ac[e]); }
+    if k == K.BIN {
+        let x = evs(doc, filter, jj.f.aa[e], v);
+        if x < 0 { return -1; }
+        let y = evs(doc, filter, jj.f.ab[e], v);
+        if y < 0 { return -1; }
+        let op = jj.f.ac[e];
+        if op >= 21 { return arith(doc, filter, op, x, y); }
+        let c = cmp_vals(doc, filter, x, y);
+        if c == -2 { return -1; }
+        return mk_bool(cmp_result(op, c));
+    }
+    if k == K.FIELD {
+        let s = evs(doc, filter, jj.f.aa[e], v);
+        if s < 0 { return -1; }
+        return nav_key(doc, s, jj.f.ab[e], jj.f.ac[e]);
+    }
+    if k == K.IDX {
+        let s = evs(doc, filter, jj.f.aa[e], v);
+        if s < 0 { return -1; }
+        return nav_idx(doc, s, jj.f.ab[e]);
+    }
+    if k == K.PIPE {
+        let x = evs(doc, filter, jj.f.aa[e], v);
+        if x < 0 { return -1; }
+        return evs(doc, filter, jj.f.ab[e], x);
+    }
+    if k == K.AND {
+        let x = evs(doc, filter, jj.f.aa[e], v);
+        if x < 0 { return -1; }
+        if !truthy(x) { return jj.ev.hfalse; }
+        let y = evs(doc, filter, jj.f.ab[e], v);
+        if y < 0 { return -1; }
+        return mk_bool(truthy(y));
+    }
+    if k == K.OR {
+        let x = evs(doc, filter, jj.f.aa[e], v);
+        if x < 0 { return -1; }
+        if truthy(x) { return jj.ev.htrue; }
+        let y = evs(doc, filter, jj.f.ab[e], v);
+        if y < 0 { return -1; }
+        return mk_bool(truthy(y));
+    }
+    if k == K.ALT {
+        let x = evs(doc, filter, jj.f.aa[e], v);
+        if x < 0 { return -1; }
+        if truthy(x) { return x; }
+        return evs(doc, filter, jj.f.ab[e], v);
+    }
+    if k == K.NEG {
+        let x = evs(doc, filter, jj.f.aa[e], v);
+        if x < 0 { return -1; }
+        return neg_val(doc, filter, x);
+    }
+    if k == K.IF {
+        let c = evs(doc, filter, jj.f.aa[e], v);
+        if c < 0 { return -1; }
+        if truthy(c) { return evs(doc, filter, jj.f.ab[e], v); }
+        return evs(doc, filter, jj.f.ac[e], v);
+    }
+    if k == K.OBJ { return eval_obj(doc, filter, e, v); }
+    if k == K.ARR {
+        if jj.f.aa[e] < 0 { return jj.ev.harr0; }
+        if jj.f.ab[e] >= 0 {
+            let s = jj.f.ab[e];
+            let r = jj.f.s_reg[s];
+            reg_touch(r);
+            if jj.ev.rerr[r] != 0 { return -1; }
+            if scope_parent_check(s) != 0 { return -1; }
+            return reg_list(r);
+        }
+        let r = jj.f.ac[e];
+        reg_clear(r);
+        if jj.ev.tp >= 60 { return fatal("expressions nested too deeply"); }
+        jj.ev.tk[jj.ev.tp] = 5;
+        jj.ev.ta[jj.ev.tp] = r;
+        jj.ev.tp += 1;
+        let rc = run(doc, filter, jj.f.aa[e], v);
+        jj.ev.tp -= 1;
+        if rc != 0 { return -1; }
+        return reg_list(r);
+    }
+    if k == K.FOLD {
+        var kind = jj.f.ac[e];
+        var r = 0;
+        if jj.f.ab[e] >= 0 {
+            let s = jj.f.ab[e];
+            r = jj.f.s_reg[s];
+            reg_touch(r);
+            if jj.ev.rerr[r] != 0 { return -1; }
+            if scope_parent_check(s) != 0 { return -1; }
+            return fold_result(r, kind);
+        }
+        r = jj.f.ad[e];
+        reg_clear(r);
+        if jj.ev.tp >= 60 { return fatal("expressions nested too deeply"); }
+        jj.ev.tk[jj.ev.tp] = 3 + kind - 1;
+        jj.ev.ta[jj.ev.tp] = r;
+        jj.ev.tp += 1;
+        let rc = run(doc, filter, jj.f.aa[e], v);
+        jj.ev.tp -= 1;
+        if rc != 0 { return -1; }
+        return fold_result(r, kind);
+    }
+    if k == K.FN {
+        let id = jj.f.ac[e];
+        if id == F.LENGTH { return length_of(doc, filter, v); }
+        if id == F.TYPE { return jj.ev.htype[type_idx(jj.v.vt[v])]; }
+        if id == F.NOT { return mk_bool(!truthy(v)); }
+        if id == F.KEYS { return keys_of(doc, filter, v); }
+        if id == F.HAS {
+            let a = evs(doc, filter, jj.f.aa[e], v);
+            if a < 0 { return -1; }
+            return has_of(doc, filter, v, a);
+        }
+        if id == F.ADD { return add_list(doc, filter, v); }
+        if id == F.TOSTRING { return tostring_of(doc, filter, v); }
+        if id == F.TONUMBER { return tonumber_of(doc, filter, v); }
+        return math_of(doc, filter, id, v);
+    }
+    return fatal("an expression of this kind where a single value is needed");
+}
+
+// the iteration `.[]` of a scope is an error unless the iterated value is an array or object
+fn scope_parent_check(s: i64) -> i64 {
+    let p = jj.f.s_par[s];
+    if jj.sc.anyerr { if nav_check(p) != 0 { return 1; } }
+    var tag = 1;
+    if jj.sc.sgen[p] == gen_of(p) { tag = jj.sc.stag[p]; }
+    if tag == 6 || tag == 7 { return 0; }
+    jqerr("Cannot iterate over " + tag_name(tag));
+    return 1;
+}
+
+// hand a value to the terminal of the enclosing scope body
+fn terminal(doc: text, filter: text, h: i64) -> i64 {
+    let tp = jj.ev.tp - 1;
+    let kind = jj.ev.tk[tp];
+    let r = jj.ev.ta[tp];
+    if kind == 1 {
+        if jj.o.sep { jj.o.text += "\n"; }
+        jj.o.sep = true;
+        jj.o.results += 1;
+        write_h(doc, filter, h, 0);
+        return 0;
+    }
+    if kind == 2 {
+        if append_reg(r, h, jj.f.r_depth[r]) != 0 { return 1; }
+        return 0;
+    }
+    if kind == 5 {
+        if append_reg(r, h, jj.ev.depth) != 0 { return 1; }
+        return 0;
+    }
+    if kind == 3 { return fold_add(doc, filter, r, h); }
+    reg_touch(r);
+    jj.ev.rc[r] += 1;
+    return 0;
+}
+
+// play a scope's register back (the streaming happened while the document was read)
+fn play(doc: text, filter: text, e: i64) -> i64 {
+    let s = jj.f.aa[e];
+    if scope_parent_check(s) != 0 { return 1; }
+    if jj.f.s_term[s] == 1 { return 0; }
+    let r = jj.f.s_reg[s];
+    reg_touch(r);
+    if jj.ev.rerr[r] != 0 { return 1; }
+    var p = jj.ev.rh[r];
+    let nxt = jj.f.nx[e];
+    while p >= 0 {
+        let nn = jj.v.vn[p];
+        if nxt >= 0 {
+            if run(doc, filter, nxt, p) != 0 { return 1; }
+        } else {
+            if terminal(doc, filter, p) != 0 { return 1; }
+        }
+        p = nn;
+    }
+    return 0;
+}
+
+// run the tree from node e with input v; 0, or 1 with the error set
+fn run(doc: text, filter: text, e0: i64, v0: i64) -> i64 {
+    var e = e0;
+    var v = v0;
+    while true {
+        if e < 0 { return terminal(doc, filter, v); }
+        let k = jj.f.ak[e];
+        if k == K.PIPE { e = jj.f.aa[e]; continue; }
+        if k == K.SELECT {
+            let c = evs(doc, filter, jj.f.aa[e], v);
+            if c < 0 { return 1; }
+            if !truthy(c) { return 0; }
+            e = jj.f.nx[e];
+            continue;
+        }
+        if k == K.EMPTY { return 0; }
+        if k == K.COMMA {
+            if run(doc, filter, jj.f.aa[e], v) != 0 { return 1; }
+            e = jj.f.ab[e];
+            continue;
+        }
+        if k == K.IF {
+            let c = evs(doc, filter, jj.f.aa[e], v);
+            if c < 0 { return 1; }
+            if truthy(c) { e = jj.f.ab[e]; } else { e = jj.f.ac[e]; }
+            continue;
+        }
+        if k == K.ALT {
+            let x = evs(doc, filter, jj.f.aa[e], v);
+            if x < 0 { return 1; }
+            if truthy(x) { v = x; e = jj.f.nx[e]; continue; }
+            e = jj.f.ab[e];
+            continue;
+        }
+        if k == K.PLAY { return play(doc, filter, e); }
+        if k == K.ITER {
+            // a dynamic iteration over a built value
+            let s = evs(doc, filter, jj.f.aa[e], v);
+            if s < 0 { return 1; }
+            let t = jj.v.vt[s];
+            if t == 1 { jqerr("Cannot iterate over null"); return 1; }
+            if t != 6 && t != 7 { jqerr("Cannot iterate over " + type_name(s)); return 1; }
+            if jj.v.vs[s] == 0 { fatal("iterating a value taken from the document that was not read for this"); return 1; }
+            var p = jj.v.va[s];
+            let nxt = jj.f.nx[e];
+            while p >= 0 {
+                var w = p;
+                if t == 7 { w = jj.v.vb[p]; }
+                let nn = jj.v.vn[p];
+                if run(doc, filter, nxt, w) != 0 { return 1; }
+                p = nn;
+            }
+            return 0;
+        }
+        let h = evs(doc, filter, e, v);
+        if h < 0 { return 1; }
+        v = h;
+        e = jj.f.nx[e];
+    }
+    return 0;
+}
+
+// the scopes of an iteration node whose element just ended: run their bodies
+fn run_unit(doc: text, filter: text, n: i64) -> i64 {
+    var s = jj.f.sc1[n];
+    let d = jj.f.s_depth[s];
+    let save = jj.ev.depth;
+    var rc = 0;
+    while s >= 0 && rc == 0 {
+        let term = jj.f.s_term[s];
+        var r = 0;
+        var skip = false;
+        if term != 1 {
+            r = jj.f.s_reg[s];
+            reg_touch(r);
+            if jj.ev.rerr[r] != 0 { skip = true; }
+        }
+        if !skip {
+            jj.ev.depth = d;
+            var h = jj.ev.hnull;
+            if jj.f.want[n] != 0 { h = node_val(n); }
+            if h >= 0 {
+                jj.ev.tk[0] = term;
+                jj.ev.ta[0] = r;
+                jj.ev.tp = 1;
+                var x = run(doc, filter, jj.f.s_body[s], h);
+                if x != 0 {
+                    if jj.ev.err == 1 && term != 1 { jj.ev.rerr[r] = 1; jj.ev.emsg = jj.err; x = 0; jj.ev.err = 0; }
+                }
+                rc = x;
+            } else if jj.ev.err == 1 && term != 1 {
+                jj.ev.rerr[r] = 1;
+                jj.ev.emsg = jj.err;
+                jj.ev.err = 0;
+            } else { rc = 1; }
+        }
+        s = jj.f.s_next[s];
+    }
+    // everything made for this element is gone
+    jj.v.top[d] = jj.v.base[d];
+    if d == 1 { jj.ev.scr = ""; }
+    jj.ev.depth = save;
+    jj.ev.tp = 0;
+    return rc;
+}
+
+// the end of the document (or of the early exit): run the tree at the document level
+fn run_root(doc: text, filter: text) -> i64 {
+    jj.ev.depth = 0;
+    jj.ev.tp = 1;
+    jj.ev.tk[0] = 1;
+    jj.ev.ta[0] = 0;
+    var v = jj.ev.hnull;
+    if jj.f.want[0] != 0 { v = node_val(0); }
+    var rc = 1;
+    if v >= 0 { rc = run(doc, filter, jj.f.root, v); }
+    if rc != 0 && len(jj.err) == 0 { jj.err = "jx: error"; }
+    return rc;
+}
