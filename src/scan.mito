@@ -205,6 +205,7 @@ fn find_key(doc: text, kn: i64, ks: i64, kl: i64, esc: i64) -> i64 {
 // the whole document: 0, or 1 with j.err set
 fn scan(doc: text, filter: text) -> i64 {
     var p = skip_ws(doc, 0);
+    if byte_at(doc, 0) == 239 && byte_at(doc, 1) == 187 && byte_at(doc, 2) == 191 { p = skip_ws(doc, 3); }   // a byte order mark
     if p >= len(doc) { return 0; }
     j.sc.ugen = 1;
     var node = 0;
