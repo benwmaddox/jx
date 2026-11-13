@@ -15,68 +15,49 @@ echo '{"users":[{"n":"ann","age":91},{"n":"bo","age":7}]}' | ./jx.exe -c '.users
 "ann"
 ```
 
-jx reads one document on standard input and takes the filter as its first argument; flags are `-c` (compact; the default is jq's
+jx reads one document (standard input, or one input file) and takes the filter as its first argument; flags are `-c` (compact; the default is jq's
 indented output), `-r` (a string result is written raw) and `--validate` (below). Results are written after the whole document has been read; an error
 writes a message to standard error and exits with 1 (jq uses 2, 3 and 5), with nothing on standard output.
 
 **Options.** jx parses its own arguments (the program takes the runtime's raw `args`), so an option is understood or refused wherever it is written, before or
 after the filter, long or short, combined (`-cr`): `-c`, `-r`, `-j`, `-n`, `-e`, `-s`/`--slurp`, `-a`/`--ascii-output`, `--seq`, `-M`, `--tab`, `--indent n`, `--arg`,
-`--argjson`, `--args`, `--jsonargs`, `--validate`, `--explain` and `--dump-program` are built; every other jq option is a hard error before anything is read,
-`jx: option '-S' is not supported yet` (`-S -C -f -L -R -h -V -b` and `--stream --stream-errors --slurpfile --rawfile --sort-keys --color-output --raw-output0
---raw-input --from-file --library-path --binary --help --version --build-configuration --strict`), `jx: unknown option '--bogus'` for anything else.
+`--argjson`, `--args`, `--jsonargs`, `--slurpfile`, `--rawfile`, `-f`/`--from-file`, `-R`/`--raw-input`, `-h`/`--help`, `-V`/`--version`, `--validate`, `--explain`
+and `--dump-program` are built; every other jq option is a hard error before anything is read, `jx: option '-S' is not supported yet` (`-S -C -L -b` and `--stream
+--stream-errors --sort-keys --color-output --raw-output0 --library-path --binary --build-configuration --strict`), `jx: unknown option '--bogus'` for anything else.
+Standard input is read only when the filter needs it (`stdin_text`, a Mitochondria runtime feature): `-n`, `--explain`, `--dump-program`, `--help`, `--version` and a
+run with an input file never wait for it. `jx --version` prints `jx 0.1` (jq prints `jq-1.8.2`); `--help` prints a short usage text of jx's own.
 `-s` wraps the one document in an array (no input at all gives `[]`); a second value is the usual "more than one JSON value" error, so `-s` over several
-documents fails instead of answering. `-a` writes every character above 127 as `\uXXXX` (and with `-r` a string is still written quoted, as jq does); `--seq` writes
+documents fails instead of answering. `-a` writes every character above 127 as a `u`-escape (and with `-r` a string is still written quoted, as jq does); `--seq` writes
 a record separator (U+001E) before each result. `-S` is refused because document values are copied as spans and never parsed, so keys cannot be sorted
-without parsing every object; `-C` because the writer copies spans; `-f`/`--from-file` and `-L` because the runtime gives a program no file access. A second plain
-argument is an input file (`jx: input files are not supported yet`). No filter means `.` as in jq; `--` ends the options.
+without parsing every object; `-C` because the writer copies spans; `-L` (modules) by owner scope.
 
-**Exit codes** are jq's where the situation is the same: 2 for a usage error (above), 3 for a syntax error in the filter, 5 for invalid input and for an error raised
-while the filter runs (jq prints the results that came before the error first; jx writes nothing on standard output), 0 otherwise. Exit code 1 is jx's own: a filter that
-uses something Stage 2 does not support (`jx: not supported in Stage 2: ...`, found before any input is read) or a limit of jx (a full arena). The message goes to standard error.
-
-**Limits.** The input is up to 4 GiB - 1 (the literal in `doc: utf8<4294967295>` in `src/jx.mito`; the runtime reserves it and commits pages as they are read, so a small input
-costs nothing). The output buffer is 1 GiB (`Out.text`): the runtime allows a text field of 4 GiB - 1 and jx was run with one (a 529 MB document printed indented, 1.14 GB, in 22 s with
-a 2.8 GB peak), but **every GiB declared costs about 10 ms of start-up on every run** (a tiny document: 27 ms with 1 GiB, 38 ms with 2 GiB, 58 ms with 4 GiB; Stage 1 took 10 ms),
-so the default is 1 GiB; an output over it ends with a runtime error naming the field. A 529 MB input, a 138 MB indented output and a 192 MB compact output were run. Strings with escapes are
-compared up to 1 MB (`J.tmp`); depth is 10000 like jq. Values built while evaluating live in an arena of 16 M entries at the document level and 1 M entries at each of three nesting
-depths of iterations; running out is a named error (exit 1). The arena arrays cost start-up time too (about 0.5 ms per million entries), so the floor of a tiny document is 27 ms against Stage 1's 10 ms
-(jq 9 ms); a smaller arena (`Lim.REG0` and the array sizes of `Val` in `src/jx.mito`) trades the capacity of collected lists for start-up time.
-
-## What it supports
-
-| Feature | |
-| --- | --- |
-| paths | `.`, `.name`, `."odd key"`, `.["key"]`, `.a.b`, `.a[0].b`, `.a.[0]`, `.[]`, `.[2:4]`, `.[:-1]` slices of arrays and strings |
-| pipes and generators | `a \| b`, `,`, `//` (also with a generator on the left), `empty`, `select(f)`, `first`, `first(f)`, `last(f)`, `limit(n; f)`, `nth(n; f)`, `skip(n; f)`, `isempty(f)`, `until(c; u)`, `range(n)`, `range(a; b)`, `range(a; b; s)` |
-| arithmetic | `+ - * / %` and unary minus: numbers as IEEE doubles printed as jq prints them; `+` on strings, arrays and objects; `-` on arrays; `*` on strings (repeat) and objects (deep merge); `/` on strings (split); `null` is the identity of `+`; division by zero and `%` as jq 1.8.2 |
-| comparison and logic | `== != < <= > >=` (jq's order across types, exact on number literals), `and`, `or`, `not`; generators in operands give jq's cartesian order |
-| conditionals | `if/elif/else/end` (the condition may be a generator) |
-| construction | `[...]`, `{a: .x, "b c": .y, (.k): .v, $x, a}`, `map(f)`; unchanged values are copied from the input as spans |
-| errors | `try E`, `try E catch H`, `E?`, `error`, `error(v)`; jq's error messages (`Cannot index number with string ("a")`, `number (1) and string ("a") cannot be added`) |
-| variables | `E as $x \| body` (one name, no destructuring), `$x` |
-| builtins | `length`, `type`, `keys`, `has`, `add`, `add(f)`, `not`, `tostring`, `tonumber`, `toboolean`, `arrays objects iterables scalars values booleans nulls numbers strings`, `empty` |
-| output | indented or compact, numbers as jq prints them, strings re-escaped as jq does, invalid UTF-8 replaced by U+FFFD as jq does |
-
-Number semantics follow jq 1.8.2: a literal that is only passed through keeps its canonical text (`1e3` prints `1E+3`, `100000000000000000000` keeps all its digits,
-`-0` stays); arithmetic is on doubles (a literal is first rounded to 17 significant digits, half even, as jq's decNumber step does) and prints the shortest
-round-trip form in jq's layout (`1e+17`, `1e-05`, `0.30000000000000004`, `nan` as `null`, infinity as `1.7976931348623157e+308`); comparing two literals is exact
-(`100000000000000000000 == 100000000000000000001` is false, `1.0 == 1` is true). `src/num.mito` is the parser and printer (checked in `tests/numcheck.py` against
-Python and jq, and in `tests/numarith.py` against jq on 1000 random pairs through every operator).
-
-## What is rejected, and how
+**Input files.** `jx FILTER FILE` reads the file as the document (`-` is standard input). jx reads one document, so exactly one file is accepted; a second one is
+`jx: not supported yet: more than one input file` (exit 2), and so is a file holding several values (the usual "more than one JSON value" error). A file that
+cannot be opened is `jx: error: Could not open file NAME: No such file or directory` (exit 2, as jq; jq's text starts with `jq:`). `-n` never opens the file.
+`-f FILE` / `--from-file FILE` reads the filter from a file (jq's flag takes the first plain argument as the file name: `jx -f prog.jq data.json`); the filter
+may have `#` comments and any whitespace, with jq 1.8's rule that a comment goes on past a line break preceded by an odd number of backslashes (also before CRLF); comments are
+accepted in filters given on the command line too (up to 65,536 bytes of filter text, 16,384 bytes of builtins written in jq). `--slurpfile NAME FILE` binds `$NAME` to an array of
+every value in the file and `--rawfile NAME FILE` to its text; both appear in `$ARGS.named` (the first of several options with one name wins, as in jq). The files
+are read when the filter is compiled and held with the filter's literals (4 MiB in all; a bigger file is `jx: ... is too large`); a `--slurpfile` file that is not
+JSON fails when `$NAME` is used (exit 5; jq exits 2 with `Bad JSON in --slurpfile` before it starts). `-R`/`--raw-input` makes the input one string: with
+`-s` the whole text (also empty), without it the one line (several lines would be one document each and are `not supported yet`; up to 16 MiB as a JSON string);
+`-n` ignores the input as always. `$ENV` and `env` give the environment as an object (built only when the filter mentions `ENV` or `env`; up to 1 MiB of environment);
+`input_filename` is `null` with `-n` and otherwise the file name (`<stdin>` for standard input, as jq 1.8.2 does); `input_line_number` is jq's count of the input
+lines read when the first value is complete (jq reads 4,095-byte pieces; the number is worked out the same way). `debug`, `debug(msg)` and `stderr` write to
+standard error while the filter runs (`["DEBUG:",value]` and a line break; `stderr` writes a string raw and any other value as compact JSON, no line break, as jq 1.8.2);
+standard output is written at the end, so the two streams are only ordered as jq orders them when you capture them separately (`tests/runtime.py` compares both).
 
 Everything else is rejected **when the filter is compiled**, before any input is read: exit code 1, `jx: not supported in Stage 2: ...` with the filter position,
 nothing on standard output. There is no fallback engine. By owner scope (Stage 3) these stay rejected: regular expressions (`test match capture sub gsub scan
 splits`), `walk`, `path paths getpath setpath delpaths del pick`, `tostream fromstream truncate_stream`, assignment and update (`=`, `|=`, `+=` ...), computed
 and negative indexes in user filters (only the built-in prelude may use them), `..` and `recurse`, dates, modules (`import`, `include`), `$__loc__`,
-SQL-style operators, `input`/`inputs`, `debug`/`stderr`, `$ENV`/`env`, and a `[]` together with a key or an index on the same value (`.[] , .a`). `tests/reject.txt`
+SQL-style operators, `input`/`inputs`, and a `[]` together with a key or an index on the same value (`.[] , .a`). `tests/reject.txt`
 lists them. Syntax errors exit with 1 and say `syntax error` (`tests/syntax.txt`). A few operations on values of the document that jx does not parse fail at run
-time with `not supported` (a repeated string over 15 MB, `keys` of an object with more than 60 keys).
+time with `not supported` (a repeated string over 15 MB, `keys` of an object with more than 4,000 keys).
 
-**Needs a Mitochondria runtime feature (owner decision).** `$ENV`/`env` (a program has no access to the environment), `-f`/`--from-file`, input files and
-`--slurpfile`/`--rawfile` (no file access), `debug`/`stderr` (no stderr output while a program runs), and `-n` still waits for stdin EOF: the runtime reads standard
-input to its end before `main` runs for a program that declares `doc: ... from stdin`, so `jx -n FILTER` and `jx --explain FILTER` block until stdin is closed
-(use `< /dev/null`, `< NUL` or a closed pipe). There is no way around this inside jx.
+**Mitochondria runtime features used.** `stdin_text` (stdin read on first use), `from env`, `read_file`/`file_exists`, `eprint` and the libm builtins (Mitochondria PR #47,
+compiler built from commit 31f49b2 or later: `build.sh` looks for `target/jxrx-mito`, `MITO=` overrides; an older compiler gives a false 27 ms start-up).
+Still missing in the runtime: `hypot`-style functions `jn`, `yn`, `erf`, `erfc` (so these three are rejected), `input`/`inputs` and a way to exit from a filter (`halt`).
 
 ## How it works (files in `src/`)
 

@@ -2820,8 +2820,6 @@ fn wrap_cli_args(root: i64) -> i64 {
 // the builtins written in jq (each is parsed again at every call, with the arguments as closures)
 fn prelude_text() -> text {
     return "def in(xs): . as $x | xs | has($x);"
-        + "def debug(msg): (msg | debug | empty), .;"
-        + "def fma(a; b; c): c as $c | b as $b | a as $a | [$a, $b, $c] | _fma;" 
         + "def inside(xs): . as $x | xs | contains($x);" 
         + "def any(g; c): isempty(first(g | c | select(.))) | not;" 
         + "def all(g; c): isempty(first(g | c | select(. | not)));" 
@@ -2848,5 +2846,7 @@ fn prelude_text() -> text {
         + "def normals: select(isnormal);" 
         + "def transpose: (map(length) | max // 0) as $l | [range(0; $l) as $j | map(.[$j])];" 
         + "def IN(s): isempty(first(s == . | select(.))) | not;" 
-        + "def IN(src; s): isempty(first(src == s | select(.))) | not;";
+        + "def IN(src; s): isempty(first(src == s | select(.))) | not;"
+        + "def debug(msg): (msg | debug | empty), .;"
+        + "def fma(a; b; c): c as $c | b as $b | a as $a | [$a, $b, $c] | _fma;";
 }

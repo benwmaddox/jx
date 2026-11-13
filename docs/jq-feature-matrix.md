@@ -44,7 +44,7 @@ A case can carry several tags, so rows overlap. `core` matches every case. Colum
 | input-inputs | 2 | 1 | 1 | 0 | 0 | D | 4 | Later (proposal) | input/inputs/debug/stderr: next document is a new scan; cheap in the driver (about 1 day), design stage 4 |
 | walk | 4 | 3 | 0 | 1 | 0 | C | 6 | Skip (proposal) | owner decision: needs a rebuilt tree of the node |
 | entries | 3 | 2 | 1 | 0 | 0 | B | 3 | Done (Stage 3): to_entries, from_entries (native, jq 1.8.2 key/value variants), with_entries, map_values (nested map_values deeper than the parse limit is rejected) | to_entries/from_entries/with_entries: key/value span pairs, design stage 3 |
-| env | 0 | 0 | 0 | 0 | 0 | D | 3 | Rejected: needs a Mitochondria runtime feature (no environment access) | $ENV/env is a compile-time constant; under 1 hour |
+| env | 0 | 0 | 0 | 0 | 0 | D | 3 | Built (runtime-env): `$ENV` and `env` from the runtime's `from env`, built only when the filter mentions them | tests/runtime.py compares them with jq |
 | formats | 7 | 7 | 0 | 0 | 0 | D | 5 | Done (Stage 3): @text @json @csv @tsv @html @uri @sh @base64 @base64d, @fmt "..." | @csv/@tsv/@sh/@uri/@html/@base64 are output-side transforms on strings; cheap (about 1 day total) |
 | regex | 0 | 0 | 0 | 0 | 0 | B | 6 | Skip (proposal) | owner decision: regex skipped (needs an engine; Oniguruma semantics) |
 | tostream | 0 | 0 | 0 | 0 | 0 | C | 6 | Skip (proposal) | owner decision: tostream/fromstream/truncate_stream need a path stack and --stream style events |
@@ -198,7 +198,7 @@ Method: each `name/arity` from `jq -nc 'builtins|sort'` is compiled as `if false
 | get_search_list/0 | modules and meta | D | Skip (proposal) |
 | have_decnum/0 | modules and meta | D | Skip (proposal) |
 | have_literal_numbers/0 | modules and meta | D | Skip (proposal) |
-| input_line_number/0 | env and I/O | D | Later (proposal) |
+| input_line_number/0 | env and I/O | D | Built (runtime-files): jq's line count (4,095-byte pieces) worked out from the input |
 | lgamma_r/0 | math | B | Stage 3 (proposal) |
 | modulemeta/0 | modules and meta | D | Skip (proposal) |
 | tostream/0 | streams | C | Skip (proposal) |
@@ -224,7 +224,7 @@ Manual-only names (in the v1.8 manual titles but not in `builtins`; mostly keywo
 | streams | 3 | 3 | C | Skip (proposal) | owner decision: tostream/fromstream/truncate_stream need a path stack |
 | dates | 11 | 0 | D | Open (proposal) | pure functions but need a calendar and strptime implementation (about 2-4 days); now is non-deterministic |
 | SQL-style | 7 | 7 | B | Later (proposal) | jq-defined on top of reduce and objects; free once defs and reduce work |
-| env and I/O | 11 | 1 | D | Later (proposal) | env is a compile-time constant; input/inputs/debug/stderr/halt belong to the driver |
+| env and I/O | 11 | 1 | D | Partly built: env, $ENV, input_filename, input_line_number, debug, debug(msg), stderr; still rejected: input, inputs, halt, halt_error, getpath-style I/O | input/inputs/halt need a driver loop over documents |
 | format | 1 | 1 | D | Later (proposal) | format("csv") etc. dispatch to the @formats |
 | modules and meta | 7 | 7 | D | Skip (proposal) | module loader, build info and search paths; not needed for filtering |
 
@@ -281,8 +281,8 @@ Probes that matched: tojson big int/literal, keys order, sort mixed types, ltrim
 | -a | unsupported | 0/2 | D | Done (Stage 3) | ASCII escapes on output; about 1 hour |
 | -n | same | 0/0 | D | Stage 3 (proposal) | null input; needed once the filter can run without a document |
 | -s | same | 0/0 | D | Done (Stage 3): one document wrapped in an array; several documents error | slurp wraps documents in an array (design stage 4) |
-| -R | same | 0/0 | D | Later (proposal) | raw lines as strings; trivial in the driver |
-| -R -s | same | 0/0 | D | Later (proposal) | whole input as one string |
+| -R | same | 0/0 | D | Built for one line (exact); several lines are each a document of their own: `not supported yet` | -n ignores the input |
+| -R -s | same | 0/0 | D | Built: the whole text as one string (up to 16 MiB as JSON) | |
 | -R -n inputs | same | 0/0 | D | Later (proposal) | needs inputs |
 | -e false | same | 1/1 | D | Stage 3 (proposal) | exit status from last output; trivial |
 | -e null | same | 1/1 | D | Stage 3 (proposal) | exit status from last output; trivial |
@@ -291,8 +291,8 @@ Probes that matched: tojson big int/literal, keys order, sort mixed types, ltrim
 | exit status: runtime error | same | 5/5 | D | Stage 2 (proposal) | exit code 5 on runtime error; message text is an open question in design 10.2 |
 | --arg | same | 0/0 | D | Stage 3 (proposal) | compile-time constant variable |
 | --argjson | same | 0/0 | D | Stage 3 (proposal) | compile-time constant variable |
-| --slurpfile | same | 0/0 | D | Later (proposal) | reads a file at start |
-| --rawfile | same | 0/0 | D | Later (proposal) | reads a file at start |
+| --slurpfile | same | 0/0 | D | Built (runtime-files): `$NAME` is an array of every value in the file | files are held with the filter literals (4 MiB); a bad file fails when `$NAME` is used (exit 5, jq 2) |
+| --rawfile | same | 0/0 | D | Built (runtime-files): `$NAME` is the file text | 4 MiB |
 | --args | same | 0/0 | D | Later (proposal) | $ARGS.positional constant |
 | --jsonargs | unsupported | 0/2 | D | Later (proposal) | $ARGS.positional constant |
 | $ARGS.named | same | 0/0 | D | Later (proposal) | constant object |
@@ -304,8 +304,8 @@ Probes that matched: tojson big int/literal, keys order, sort mixed types, ltrim
 | --stream | unsupported | 0/2 | D | Later (proposal) | natural fit for the scanner; needs a path stack (design stage 6) |
 | --stream-errors | unsupported | 0/2 | D | Skip (proposal) | rare |
 | --seq | unsupported | 0/2 | D | Skip (proposal) | RFC 7464 framing; rare |
-| -f file | same | 0/0 | D | Rejected: needs a Mitochondria runtime feature (file access) | read the filter from a file; trivial |
-| --from-file | same | 0/0 | D | Rejected: needs a Mitochondria runtime feature (file access) | same as -f |
+| -f file | same | 0/0 | D | Built (runtime-files): the first plain argument is the filter file; `#` comments and newlines work | |
+| --from-file | same | 0/0 | D | Built: same as -f | |
 | file input | same | 0/0 | D | Stage 2 (proposal) | jx already reads files |
 | two input files | same | 0/0 | D | Stage 3 (proposal) | iterate documents of several files |
 | stdin as - | same | 0/0 | D | Later (proposal) | trivial |
@@ -316,7 +316,7 @@ Probes that matched: tojson big int/literal, keys order, sort mixed types, ltrim
 | --unbuffered | unsupported | 0/2 | D | Later (proposal) | flush per output; trivial |
 | --binary | unsupported | 0/2 | D | Skip (proposal) | Windows only |
 | --version | differs | 0/0 | D | Stage 2 (proposal) | string |
-| -h | differs | 0/0 | D | Later (proposal) | help text |
+| -h | differs | 0/0 | D | Built: jx prints its own short usage text, not jq's | |
 | long forms | same | 0/0 | D | Stage 3 (proposal) | long option names |
 | empty input | same | 0/0 | D | Stage 2 (proposal) | no output, exit 0 |
 | multi-document input | same | 0/0 | D | Stage 2 (proposal) | stream of documents (design 5) |
@@ -424,3 +424,16 @@ python -X utf8 -I tools/jqcompat.py report --out D:\tmp\w\jqcompat\o --md docs/j
 - Class/decision coverage is the share of cases *within* the scope, not a promise that jx output would match: jx also needs jq's error text only if the owner decides so (design 10.2).
 - Only jq.test was used; tests/man.test, tests/onig.test and tests/optional.test were not run. Real jq.test also has a few directives not exercised by this runner (`%%FAIL IGNORE MSG` is treated as a must-fail case; error text is never compared).
 - jaq failing to compile counts only the process exit code 3; jaq's own error classes were not split further. Spot checks and flag probes are one input each, on Windows; Linux behavior may differ.
+
+## Runtime features (branch runtime-features)
+
+Built on Mitochondria PR #47 (lazy `stdin_text`, `from env`, `read_file`, `file_exists`, `eprint`, libm builtins):
+- `-n`, `--explain`, `--dump-program`, `-h`/`--help`, `-V`/`--version` never read standard input.
+- One input file (`-` is stdin), `-f`/`--from-file`, `--slurpfile`, `--rawfile`, `-R` (one line, or with `-s`), `$ENV`, `env`, `input_filename`, `input_line_number`,
+  `debug`, `debug(msg)`, `stderr`, `#` comments in filters.
+- Math: acosh asinh atanh exp10 expm1 log1p logb rint significand gamma lgamma tgamma lgamma_r j0 j1 y0 y1 frexp modf copysign drem remainder nextafter nexttoward scalb scalbln
+  ldexp fmin fmax hypot fdim fma. Still rejected: jn, yn, erf, erfc (the runtime has no such function).
+- Windows `jq.exe` (chocolatey) lacks exp10, gamma, lgamma_r, significand, drem and scalb ("not found at build time"), so those are checked against Python's `math` module
+  (`tests/runtime.py --math`). Expected differences from libm: the Windows C library's `lgamma` is not accurate near 1 and 2 (relative error about 1e-10 at 1.0000000001,
+  glibc is within an ulp), `lgamma`/`tgamma` last digits differ from the jq.exe build's own libm for some arguments, `frexp` of an infinity or NaN gives exponent 0 (glibc;
+  jq.exe says -1), `ldexp` and `scalbln` take their second argument as jq's C cast does on x86 (NaN or a value beyond the int range is the smallest int).

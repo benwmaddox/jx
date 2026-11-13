@@ -422,3 +422,11 @@ label $a | [1, (label $b | 2, break $a), 3]
 [try (.[1:2]) catch .]
 [try (.[:2]) catch .]
 [try (.[1:]) catch .]
+.users[0].n # the first name
+.users | length # count
+.k,.users[0].age # two
+"a#b" # real comment
+[.users[].n] | join("#") # sep
+.users[1].n#c
+.k # café ok
+[.users[] | select(.age > 50)] | length # old
