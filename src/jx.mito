@@ -65,6 +65,27 @@ struct Filt {
     vname_len: i64[64];
     vslot: i64[64];
     vctx: i64[64];                // the automaton node a variable's value came from, -1 unknown
+    // user functions (compile time only): defs and closure parameters are inlined at each call by parsing their text again
+    ndef: i64;
+    dn_off: i64[128];             // name: position in the filter text
+    dn_len: i64[128];
+    dnp: i64[128];                // number of parameters (a closure parameter has 0)
+    dpar: i64[128];               // position of the parameter list text, -1 none
+    dbody: i64[128];              // position of the body text (a closure parameter: of the argument text)
+    dnv: i64[128];                // variables visible at the definition
+    dkind: i64[128];              // 0 def, 1 closure parameter
+    dsd: i64[128];                // closure parameter: defs, variables and hiding windows at the call site
+    dsv: i64[128];
+    dsw: i64[128];
+    dan: i64[128];                // `$` parameter: the node of its argument
+    curw: i64;                    // current hiding window, -1 none
+    nw: i64;
+    wdlo: i64[600];
+    wdhi: i64[600];
+    wvlo: i64[600];
+    wvhi: i64[600];
+    wprev: i64[600];
+    xdepth: i64;
     // object constructors: key expression and value expression
     okey: i64[256];
     oval: i64[256];
@@ -220,6 +241,13 @@ struct J {
     wv_bound: i64;
     noas: i64;                    // compile: 1 while the source of reduce is parsed (an `as` belongs to the reduce)
     pn: i64;                      // compile: arguments parsed by parse_args
+    argp: i64[10];                // compile: start positions of the arguments of a user function call
+    pbn: i64;                     // compile: bindings of patterns being parsed (a stack)
+    pbslot: i64[64];
+    pbnode: i64[64];
+    pstk: i64[10];                // compile: the path of steps of the pattern leaf being parsed: 0 index, 1 key
+    pstb: i64[10];
+    pstc: i64[10];
     pa: i64[4];
 }
 state jj: J;

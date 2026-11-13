@@ -469,6 +469,24 @@ fn lower_block(h: i64, t: i64) {
         goto_node(jj.f.ab[e], x, t, Op.JMP);
         return;
     }
+    if k == K.FOREACH {
+        let init = lx(jj.f.ad[e], x, -1);
+        let fb = jj.f.ae[e];
+        let rs = rs_reg(jj.f.ad[fb]);
+        emit(Op.MOV, rs, init, 0, 0, pos);
+        goto_node(jj.f.aa[e], x, t, Op.JMP);
+        return;
+    }
+    if k == K.FBIND {
+        let slot = jj.f.ac[e];
+        let rs = rs_reg(jj.f.ad[e]);
+        emit(Op.MOV, var_reg(slot), x, 0, 0, pos);
+        let u = lx(jj.f.ab[e], rs, -1);
+        emit(Op.MOV, rs, u, 0, 0, pos);
+        goto_node(jj.f.nx[e], rs, t, Op.GOSUB);
+        emit(Op.RET, 0, 0, 0, 0, pos);
+        return;
+    }
     if k == K.RBIND {
         let slot = jj.f.ac[e];
         let r = jj.f.ad[e];
