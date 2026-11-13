@@ -1,0 +1,338 @@
+{
+ "label": "stage3-collectors-math",
+ "date": "2026-11-12",
+ "commit": "0a83a93",
+ "unit": "median ms and peak working set MB, whole process, Windows",
+ "timing": [
+  {
+   "rows": 20000,
+   "size": "1.59 MB",
+   "filter": ".users[0].n",
+   "ms": {
+    "jx": "20",
+    "jq": "190",
+    "jaq": "169"
+   },
+   "peak": {
+    "jx": "27",
+    "jq": "39",
+    "jaq": "43"
+   }
+  },
+  {
+   "rows": 20000,
+   "size": "1.59 MB",
+   "filter": ".users | length",
+   "ms": {
+    "jx": "25",
+    "jq": "195",
+    "jaq": "181"
+   },
+   "peak": {
+    "jx": "27",
+    "jq": "39",
+    "jaq": "43"
+   }
+  },
+  {
+   "rows": 20000,
+   "size": "1.59 MB",
+   "filter": ".users[] | select(.age >= 85) | .n",
+   "ms": {
+    "jx": "32",
+    "jq": "201",
+    "jaq": "173"
+   },
+   "peak": {
+    "jx": "27",
+    "jq": "39",
+    "jaq": "43"
+   }
+  },
+  {
+   "rows": 20000,
+   "size": "1.59 MB",
+   "filter": ".users[] | .addr.city",
+   "ms": {
+    "jx": "34",
+    "jq": "219",
+    "jaq": "232"
+   },
+   "peak": {
+    "jx": "28",
+    "jq": "39",
+    "jaq": "43"
+   }
+  },
+  {
+   "rows": 20000,
+   "size": "1.59 MB",
+   "filter": ".users[] | {n: .n, c: .addr.city}",
+   "ms": {
+    "jx": "139",
+    "jq": "230",
+    "jaq": "222"
+   },
+   "peak": {
+    "jx": "29",
+    "jq": "39",
+    "jaq": "43"
+   }
+  },
+  {
+   "rows": 20000,
+   "size": "1.59 MB",
+   "filter": ".users | map(.age) | add",
+   "ms": {
+    "jx": "27",
+    "jq": "191",
+    "jaq": "192"
+   },
+   "peak": {
+    "jx": "28",
+    "jq": "40",
+    "jaq": "44"
+   }
+  },
+  {
+   "rows": 20000,
+   "size": "1.59 MB",
+   "filter": "[.users[] | select(.age >= 85) | .n] | length",
+   "ms": {
+    "jx": "30",
+    "jq": "192",
+    "jaq": "174"
+   },
+   "peak": {
+    "jx": "28",
+    "jq": "39",
+    "jaq": "43"
+   }
+  },
+  {
+   "rows": 20000,
+   "size": "1.59 MB",
+   "filter": "[.users[] | try (.n | tonumber) catch 0] | length",
+   "ms": {
+    "jx": "130",
+    "jq": "221",
+    "jaq": "188"
+   },
+   "peak": {
+    "jx": "28",
+    "jq": "40",
+    "jaq": "44"
+   }
+  },
+  {
+   "rows": 20000,
+   "size": "1.59 MB",
+   "filter": ".users | length as $n | $n * 2",
+   "ms": {
+    "jx": "27",
+    "jq": "190",
+    "jaq": "152"
+   },
+   "peak": {
+    "jx": "28",
+    "jq": "39",
+    "jaq": "43"
+   }
+  },
+  {
+   "rows": 20000,
+   "size": "1.59 MB",
+   "filter": "[limit(3; .users[])] | length",
+   "ms": {
+    "jx": "29",
+    "jq": "184",
+    "jaq": "175"
+   },
+   "peak": {
+    "jx": "28",
+    "jq": "39",
+    "jaq": "43"
+   }
+  },
+  {
+   "rows": 20000,
+   "size": "1.59 MB",
+   "filter": ".users[] | .age + 1",
+   "ms": {
+    "jx": "122",
+    "jq": "222",
+    "jaq": "238"
+   },
+   "peak": {
+    "jx": "28",
+    "jq": "39",
+    "jaq": "43"
+   }
+  },
+  {
+   "rows": 200000,
+   "size": "16.34 MB",
+   "filter": ".users[0].n",
+   "ms": {
+    "jx": "32",
+    "jq": "842",
+    "jaq": "675"
+   },
+   "peak": {
+    "jx": "42",
+    "jq": "325",
+    "jaq": "336"
+   }
+  },
+  {
+   "rows": 200000,
+   "size": "16.34 MB",
+   "filter": ".users | length",
+   "ms": {
+    "jx": "169",
+    "jq": "761",
+    "jaq": "567"
+   },
+   "peak": {
+    "jx": "42",
+    "jq": "325",
+    "jaq": "336"
+   }
+  },
+  {
+   "rows": 200000,
+   "size": "16.34 MB",
+   "filter": ".users[] | select(.age >= 85) | .n",
+   "ms": {
+    "jx": "156",
+    "jq": "1111",
+    "jaq": "832"
+   },
+   "peak": {
+    "jx": "43",
+    "jq": "325",
+    "jaq": "336"
+   }
+  },
+  {
+   "rows": 200000,
+   "size": "16.34 MB",
+   "filter": ".users[] | .addr.city",
+   "ms": {
+    "jx": "165",
+    "jq": "1046",
+    "jaq": "1385"
+   },
+   "peak": {
+    "jx": "46",
+    "jq": "325",
+    "jaq": "336"
+   }
+  },
+  {
+   "rows": 200000,
+   "size": "16.34 MB",
+   "filter": ".users[] | {n: .n, c: .addr.city}",
+   "ms": {
+    "jx": "223",
+    "jq": "1875",
+    "jaq": "1670"
+   },
+   "peak": {
+    "jx": "55",
+    "jq": "325",
+    "jaq": "335"
+   }
+  },
+  {
+   "rows": 200000,
+   "size": "16.34 MB",
+   "filter": ".users | map(.age) | add",
+   "ms": {
+    "jx": "161",
+    "jq": "1038",
+    "jaq": "681"
+   },
+   "peak": {
+    "jx": "42",
+    "jq": "330",
+    "jaq": "337"
+   }
+  },
+  {
+   "rows": 200000,
+   "size": "16.34 MB",
+   "filter": "[.users[] | select(.age >= 85) | .n] | length",
+   "ms": {
+    "jx": "182",
+    "jq": "1275",
+    "jaq": "792"
+   },
+   "peak": {
+    "jx": "42",
+    "jq": "327",
+    "jaq": "336"
+   }
+  },
+  {
+   "rows": 200000,
+   "size": "16.34 MB",
+   "filter": "[.users[] | try (.n | tonumber) catch 0] | length",
+   "ms": {
+    "jx": "196",
+    "jq": "1324",
+    "jaq": "955"
+   },
+   "peak": {
+    "jx": "42",
+    "jq": "330",
+    "jaq": "336"
+   }
+  },
+  {
+   "rows": 200000,
+   "size": "16.34 MB",
+   "filter": ".users | length as $n | $n * 2",
+   "ms": {
+    "jx": "145",
+    "jq": "920",
+    "jaq": "526"
+   },
+   "peak": {
+    "jx": "42",
+    "jq": "325",
+    "jaq": "336"
+   }
+  },
+  {
+   "rows": 200000,
+   "size": "16.34 MB",
+   "filter": "[limit(3; .users[])] | length",
+   "ms": {
+    "jx": "169",
+    "jq": "675",
+    "jaq": "773"
+   },
+   "peak": {
+    "jx": "50",
+    "jq": "325",
+    "jaq": "336"
+   }
+  },
+  {
+   "rows": 200000,
+   "size": "16.34 MB",
+   "filter": ".users[] | .age + 1",
+   "ms": {
+    "jx": "190",
+    "jq": "1332",
+    "jaq": "1074"
+   },
+   "peak": {
+    "jx": "43",
+    "jq": "325",
+    "jaq": "336"
+   }
+  }
+ ]
+}
