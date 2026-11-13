@@ -160,7 +160,7 @@ def gen_s3(r, depth):
     if k < 0.66:
         return "%s | %s" % (r.choice([p, q, "[.[]?]", ".[]?"]), r.choice(S3_COLL))
     if k < 0.74:
-        return "%s | %s" % (r.choice([p, q, "[.[]?]"]), r.choice(S3_MATH + ["pow(.; 2)", "log10", "sin", "tostring | tonumber?", "infinite", "isnan", "isinfinite", "isnormal", "nan | isnan"]))
+        return "%s | %s" % (r.choice([p, q, "[.[]?]"]), r.choice(S3_MATH + ["pow(.; 2)", "log10", "sin", "tostring | tonumber?", "infinite", "isnan", "isinfinite", "isnormal", "nan | isnan", "expm1", "log1p", "asinh", "atanh", "logb", "rint", "modf", "frexp", "ldexp(.; 2)", "fmax(.; 1)", "fmin(.; 1)", "copysign(.; -1)", "nextafter(.; 1)", "scalbln(.; 3)"]))
     if k < 0.86:
         return "%s | %s" % (r.choice([p, q, "[.[]?]", ".[]?", gen_lit(r)]), r.choice(S3_STR))
     if k < 0.92:
