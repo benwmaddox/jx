@@ -67,17 +67,19 @@ struct Filt {
     vctx: i64[64];                // the automaton node a variable's value came from, -1 unknown
     // user functions (compile time only): defs and closure parameters are inlined at each call by parsing their text again
     ndef: i64;
-    dn_off: i64[128];             // name: position in the filter text
-    dn_len: i64[128];
-    dnp: i64[128];                // number of parameters (a closure parameter has 0)
-    dpar: i64[128];               // position of the parameter list text, -1 none
-    dbody: i64[128];              // position of the body text (a closure parameter: of the argument text)
-    dnv: i64[128];                // variables visible at the definition
-    dkind: i64[128];              // 0 def, 1 closure parameter
-    dsd: i64[128];                // closure parameter: defs, variables and hiding windows at the call site
-    dsv: i64[128];
-    dsw: i64[128];
-    dan: i64[128];                // `$` parameter: the node of its argument
+    dn_off: i64[256];             // name: position in the filter text
+    dn_len: i64[256];
+    dnp: i64[256];                // number of parameters (a closure parameter has 0)
+    dpar: i64[256];               // position of the parameter list text, -1 none
+    dbody: i64[256];              // position of the body text (a closure parameter: of the argument text)
+    dnv: i64[256];                // variables visible at the definition
+    dkind: i64[256];              // 0 def, 1 closure parameter
+    dsd: i64[256];                // closure parameter: defs, variables and hiding windows at the call site
+    dsv: i64[256];
+    dsw: i64[256];
+    dsrc: i64[256];               // the text the definition is in: 0 the filter, 1 the prelude
+    dasrc: i64[256];              // closure parameter: the text of its argument
+    dan: i64[256];                // `$` parameter: the node of its argument
     curw: i64;                    // current hiding window, -1 none
     nw: i64;
     wdlo: i64[600];
@@ -191,6 +193,10 @@ struct Ev {
     ax: f64[64];                  // fold: the sum so far
     at: i64[64];                  // fold: 0 nothing yet, 1 a value (handle in ah), 2 a double
     ah: i64[64];
+    sa: i64[524288];              // collectors (sort, group, ...): the elements, their keys, the permutation and its merge buffer
+    sk: i64[524288];
+    sb: i64[524288];
+    sc: i64[524288];
     scr: utf8<16777216>;          // scratch strings
     ptx: utf8<16777216>;         // strings that outlive the element
     tmp2: utf8<1048576>;
@@ -240,6 +246,10 @@ struct J {
     wv_used: i64;
     wv_bound: i64;
     noas: i64;                    // compile: 1 while the source of reduce is parsed (an `as` belongs to the reduce)
+    cur_src: i64;                 // compile: which text is being parsed
+    pre: utf8<16384>;             // compile: the prelude (builtins written in jq)
+    ftxt: utf8<65536>;            // compile: a copy of the filter text
+    pdepth: i64;                  // compile: nesting of parse_expr (Mitochondria allows 64 nested calls)
     pn: i64;                      // compile: arguments parsed by parse_args
     argp: i64[10];                // compile: start positions of the arguments of a user function call
     pbn: i64;                     // compile: bindings of patterns being parsed (a stack)
@@ -394,4 +404,5 @@ use "dis.mito";
 use "scan.mito";
 use "prog.mito";
 use "eval.mito";
+use "lib.mito";
 use "out.mito";

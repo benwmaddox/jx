@@ -261,6 +261,13 @@ fn lx(e: i64, vin: i64, dst: i64) -> i64 {
         emit(Op.SLICE, d, s, lo, hi, pos);
         return d;
     }
+    if k == K.DIDX {
+        let b = lx(jj.f.aa[e], vin, -1);
+        let kk = lx(jj.f.ab[e], vin, -1);
+        let d = dst_reg(dst);
+        emit(Op.DIDX, d, b, kk, 0, pos);
+        return d;
+    }
     if k == K.VAR { return put_in(var_reg(jj.f.ac[e]), dst); }
     if k == K.AS {
         let x = lx(jj.f.aa[e], vin, -1);
@@ -347,6 +354,17 @@ fn lx(e: i64, vin: i64, dst: i64) -> i64 {
             return d;
         }
         if id == F.TYPEMASK { emit(Op.TYPEMASK, d, vin, 0, jj.f.ad[e], pos); return d; }
+        if id >= 200 {
+            let a = lx(jj.f.aa[e], vin, -1);
+            let b = lx(jj.f.ab[e], vin, -1);
+            emit(Op.FN2, d, a, b, id, pos);
+            return d;
+        }
+        if id >= 100 {
+            let b = lx(jj.f.aa[e], vin, -1);
+            emit(Op.FN2, d, vin, b, id, pos);
+            return d;
+        }
         emit(Op.FN, d, vin, 0, id, pos);
         return d;
     }

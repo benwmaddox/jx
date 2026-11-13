@@ -21,6 +21,7 @@ fn bc_fn(doc: text, filter: text, id: i64, v: i64) -> i64 {
         }
         return jqerr(typed(doc, filter, v) + " cannot be parsed as a boolean");
     }
+    if id >= 20 { return lib_fn(doc, filter, id, v); }
     return math_of(doc, filter, id, v);
 }
 
@@ -131,6 +132,14 @@ fn exec(doc: text, filter: text, entry: i64) -> i64 {
         }
         else if op == Op.HAS {
             let h = has_of(doc, filter, jj.m.rv[b], jj.m.rv[c]);
+            if h < 0 { bad = true; } else { jj.m.rv[a] = h; pc += 1; }
+        }
+        else if op == Op.DIDX {
+            let h = didx_of(doc, filter, jj.m.rv[b], jj.m.rv[c]);
+            if h < 0 { bad = true; } else { jj.m.rv[a] = h; pc += 1; }
+        }
+        else if op == Op.FN2 {
+            let h = bc_fn2(doc, filter, d, jj.m.rv[b], jj.m.rv[c]);
             if h < 0 { bad = true; } else { jj.m.rv[a] = h; pc += 1; }
         }
         else if op == Op.TYPEMASK {

@@ -1,0 +1,599 @@
+// The builtins of Stage 3 that work on built values: collectors (sort, group, unique, min, max, reverse, flatten), `contains`, the
+// string and math functions, dynamic indexing. Values are arena entries as in eval.mito; a result is built with arr_new/arr_push.
+// Collectors keep their elements in the fixed scratch arrays jj.ev.sa/sk/sb/sc (524288 entries each): more elements is a named error.
+
+fn lib_cap() -> i64 {
+    return jqerr("too many elements for this collector (more than 524288)");
+}
+
+// a new link of a built array holding a copy of value h
+fn arr_push(r: i64, h: i64) -> bool {
+    let c = ent(jj.v.vt[h], jj.v.vs[h], jj.v.va[h], jj.v.vb[h]);
+    if c < 0 { return false; }
+    jj.v.vf[c] = jj.v.vf[h];
+    jj.v.vx[c] = jj.v.vx[h];
+    if jj.v.vt[h] >= 6 && jj.v.vs[h] == 0 { jj.v.vd[c] = -1; } else { jj.v.vd[c] = jj.v.vd[h]; }
+    jj.v.vn[c] = -1;
+    if jj.v.vb[r] >= 0 { jj.v.vn[jj.v.vb[r]] = c; } else { jj.v.va[r] = c; }
+    jj.v.vb[r] = c;
+    jj.v.vf[r] = jj.v.vf[r] + 1;
+    return true;
+}
+
+fn arr_new() -> i64 {
+    let r = ent(6, 1, -1, -1);
+    if r < 0 { return -1; }
+    jj.v.vf[r] = 0;
+    return r;
+}
+
+fn arr_done(r: i64) -> i64 {
+    if jj.v.vf[r] == 0 { return jj.ev.harr0; }
+    return r;
+}
+
+// the elements of array v into jj.ev.sa (which 0) or jj.ev.sk (which 1); the count, or -1
+fn gather(doc: text, v: i64, which: i64) -> i64 {
+    var a = v;
+    if jj.v.vs[a] == 0 {
+        a = built_of(doc, a);
+        if a < 0 { return -1; }
+    }
+    var n = 0;
+    var p = jj.v.va[a];
+    while p >= 0 {
+        if n >= 524288 { return lib_cap(); }
+        if which == 0 { jj.ev.sa[n] = p; } else { jj.ev.sk[n] = p; }
+        n += 1;
+        p = jj.v.vn[p];
+    }
+    return n;
+}
+
+// stable merge sort of the permutation jj.ev.sb[0..n) by the keys jj.ev.sk[perm]
+fn msort(doc: text, filter: text, n: i64) -> bool {
+    var i = 0;
+    while i < n { jj.ev.sb[i] = i; i += 1; }
+    var w = 1;
+    while w < n {
+        var lo = 0;
+        while lo < n {
+            var mid = lo + w;
+            if mid > n { mid = n; }
+            var hi = lo + 2 * w;
+            if hi > n { hi = n; }
+            var l = lo;
+            var r = mid;
+            var o = lo;
+            while l < mid && r < hi {
+                let c = cmp_vals(doc, filter, jj.ev.sk[jj.ev.sb[l]], jj.ev.sk[jj.ev.sb[r]]);
+                if c == -2 { return false; }
+                if c <= 0 { jj.ev.sc[o] = jj.ev.sb[l]; l += 1; } else { jj.ev.sc[o] = jj.ev.sb[r]; r += 1; }
+                o += 1;
+            }
+            while l < mid { jj.ev.sc[o] = jj.ev.sb[l]; l += 1; o += 1; }
+            while r < hi { jj.ev.sc[o] = jj.ev.sb[r]; r += 1; o += 1; }
+            lo += 2 * w;
+        }
+        i = 0;
+        while i < n { jj.ev.sb[i] = jj.ev.sc[i]; i += 1; }
+        w = w * 2;
+    }
+    return true;
+}
+
+// sort_by / group_by / unique_by / min_by / max_by of array v with the keys array (or the elements when keys is -1); mode 0..4
+fn by_impl(doc: text, filter: text, v: i64, keys: i64, mode: i64) -> i64 {
+    let t = jj.v.vt[v];
+    if t != 6 {
+        if mode >= 3 { return jqerr(typed(doc, filter, v) + " and " + typed(doc, filter, v) + " cannot be iterated over"); }
+        return jqerr(typed(doc, filter, v) + " cannot be sorted, as it is not an array");
+    }
+    let n = gather(doc, v, 0);
+    if n < 0 { return -1; }
+    if keys >= 0 {
+        let m = gather(doc, keys, 1);
+        if m < 0 { return -1; }
+    } else {
+        var i = 0;
+        while i < n { jj.ev.sk[i] = jj.ev.sa[i]; i += 1; }
+    }
+    if mode >= 3 {
+        if n == 0 { return jj.ev.hnull; }
+        var best = 0;
+        var i = 1;
+        while i < n {
+            let c = cmp_vals(doc, filter, jj.ev.sk[i], jj.ev.sk[best]);
+            if c == -2 { return -1; }
+            if mode == 3 { if c < 0 { best = i; } } else { if c >= 0 { best = i; } }
+            i += 1;
+        }
+        return jj.ev.sa[best];
+    }
+    if !msort(doc, filter, n) { return -1; }
+    let out = arr_new();
+    if out < 0 { return -1; }
+    if mode == 0 {
+        var i = 0;
+        while i < n {
+            if !arr_push(out, jj.ev.sa[jj.ev.sb[i]]) { return -1; }
+            i += 1;
+        }
+        return arr_done(out);
+    }
+    var cur = -1;
+    var i = 0;
+    while i < n {
+        let ix = jj.ev.sb[i];
+        var fresh = true;
+        if i > 0 {
+            let c = cmp_vals(doc, filter, jj.ev.sk[jj.ev.sb[i - 1]], jj.ev.sk[ix]);
+            if c == -2 { return -1; }
+            if c == 0 { fresh = false; }
+        }
+        if mode == 2 {
+            if fresh { if !arr_push(out, jj.ev.sa[ix]) { return -1; } }
+        } else {
+            if fresh {
+                cur = arr_new();
+                if cur < 0 { return -1; }
+                if !arr_push(out, cur) { return -1; }
+                // the pushed copy is the link: fill that one
+                cur = jj.v.vb[out];
+                jj.v.vs[cur] = 1;
+                jj.v.va[cur] = -1;
+                jj.v.vb[cur] = -1;
+                jj.v.vf[cur] = 0;
+            }
+            if !arr_push(cur, jj.ev.sa[ix]) { return -1; }
+        }
+        i += 1;
+    }
+    return arr_done(out);
+}
+
+fn reverse_of(doc: text, filter: text, v: i64) -> i64 {
+    let t = jj.v.vt[v];
+    if t == 1 { return jj.ev.harr0; }
+    if t == 2 || t == 3 { return jqerr(typed(doc, filter, v) + " has no length"); }
+    if t != 6 {
+        var n = 0.0;
+        if t == 4 { n = numd(doc, filter, v); if n < 0.0 { n = -n; } }
+        else {
+            let lh = length_of(doc, filter, v);
+            if lh < 0 { return -1; }
+            n = numd(doc, filter, lh);
+        }
+        if !(n > 0.0) { return jj.ev.harr0; }
+        let last = ent(4, 3, 0, 0);
+        if last < 0 { return -1; }
+        var ix = n - 1.0;
+        if t != 4 { ix = trunc(n) - 1.0; }
+        if ix == trunc(ix) { return jqerr("Cannot index " + type_name(v) + " with number (" + str(ix as i64) + ")"); }
+        fmt_dbl(ix);
+        return jqerr("Cannot index " + type_name(v) + " with number (" + jj.num.buf + ")");
+    }
+    let n = gather(doc, v, 0);
+    if n < 0 { return -1; }
+    let out = arr_new();
+    if out < 0 { return -1; }
+    var i = n - 1;
+    while i >= 0 {
+        if !arr_push(out, jj.ev.sa[i]) { return -1; }
+        i -= 1;
+    }
+    return arr_done(out);
+}
+
+fn flat_into(doc: text, filter: text, out: i64, v: i64, depth: i64, lvl: i64) -> bool {
+    if lvl > 40 { fatal("`flatten` of arrays nested more than 40 deep"); return false; }
+    var a = v;
+    if jj.v.vs[a] == 0 {
+        a = built_of(doc, a);
+        if a < 0 { return false; }
+    }
+    var p = jj.v.va[a];
+    while p >= 0 {
+        var e = p;
+        if jj.v.vt[e] == 6 && depth != 0 {
+            var nd = depth;
+            if depth > 0 { nd = depth - 1; }
+            if depth == -2 { jqerr(typed(doc, filter, jj.ev.stk[62]) + " and number (1) cannot be subtracted"); return false; }
+            if !flat_into(doc, filter, out, e, nd, lvl + 1) { return false; }
+        } else {
+            if !arr_push(out, e) { return false; }
+        }
+        p = jj.v.vn[p];
+    }
+    return true;
+}
+
+fn flatten_of(doc: text, filter: text, v: i64, dv: i64) -> i64 {
+    var depth = -1;
+    if dv >= 0 {
+        if jj.v.vt[dv] <= 3 { return jqerr("flatten depth must not be negative"); }
+        if jj.v.vt[dv] != 4 {
+            depth = -2;
+            jj.ev.stk[62] = dv;
+        } else {
+            let x = numd(doc, filter, dv);
+            if x < 0.0 { return jqerr("flatten depth must not be negative"); }
+            depth = floor(x) as i64;
+            if x > 1000000.0 { depth = 1000000; }
+        }
+    }
+    let t = jj.v.vt[v];
+    if t != 6 && t != 7 { return jqerr("Cannot iterate over " + type_name(v) + " (" + vdesc_short(doc, filter, v) + ")"); }
+    let out = arr_new();
+    if out < 0 { return -1; }
+    if t == 7 {
+        let o = built_of(doc, v);
+        if o < 0 { return -1; }
+        var p = jj.v.va[o];
+        while p >= 0 {
+            let e = jj.v.vb[p];
+            if jj.v.vt[e] == 6 && depth != 0 {
+                var nd = depth;
+                if depth > 0 { nd = depth - 1; }
+                if depth == -2 { return jqerr(typed(doc, filter, jj.ev.stk[62]) + " and number (1) cannot be subtracted"); }
+                if !flat_into(doc, filter, out, e, nd, 1) { return -1; }
+            } else {
+                if !arr_push(out, e) { return -1; }
+            }
+            p = jj.v.vn[p];
+        }
+        return arr_done(out);
+    }
+    if !flat_into(doc, filter, out, v, depth, 0) { return -1; }
+    return arr_done(out);
+}
+
+fn vdesc_short(doc: text, filter: text, h: i64) -> text {
+    vdesc(doc, filter, h);
+    return jj.ev.tmp3;
+}
+
+// the value of key k (a string entry) in object o, or -1 when absent
+fn obj_get(doc: text, o: i64, k: i64) -> i64 {
+    var p = jj.v.va[o];
+    while p >= 0 {
+        if str_cmp(doc, jj.v.va[p], k) == 0 { return jj.v.vb[p]; }
+        p = jj.v.vn[p];
+    }
+    return -1;
+}
+
+// a contains b for values of the same kind: 1, 0, or -1 with an error
+fn contains_in(doc: text, filter: text, a: i64, b: i64, lvl: i64) -> i64 {
+    if lvl > 40 { return fatal("`contains` of values nested more than 40 deep"); }
+    let ta = jj.v.vt[a];
+    let tb = jj.v.vt[b];
+    if ta != tb { return 0; }
+    if ta == 7 {
+        let ao = built_of(doc, a);
+        let bo = built_of(doc, b);
+        if ao < 0 || bo < 0 { return -1; }
+        var p = jj.v.va[bo];
+        while p >= 0 {
+            let av = obj_get(doc, ao, jj.v.va[p]);
+            if av < 0 { return 0; }
+            let r = contains_in(doc, filter, av, jj.v.vb[p], lvl + 1);
+            if r != 1 { return r; }
+            p = jj.v.vn[p];
+        }
+        return 1;
+    }
+    if ta == 6 {
+        let aa = built_of(doc, a);
+        let bb = built_of(doc, b);
+        if aa < 0 || bb < 0 { return -1; }
+        var pb = jj.v.va[bb];
+        while pb >= 0 {
+            var found = false;
+            var pa = jj.v.va[aa];
+            while pa >= 0 && !found {
+                let r = contains_in(doc, filter, pa, pb, lvl + 1);
+                if r < 0 { return -1; }
+                if r == 1 { found = true; }
+                pa = jj.v.vn[pa];
+            }
+            if !found { return 0; }
+            pb = jj.v.vn[pb];
+        }
+        return 1;
+    }
+    if ta == 5 {
+        let na = str_plain(doc, a, 0);
+        let nb = str_plain(doc, b, 2);
+        if nb == 0 { return 1; }
+        var i = 0;
+        while i + nb <= na {
+            if substr(jj.tmp, i, nb) == jj.ev.tmp2 { return 1; }
+            i += 1;
+        }
+        return 0;
+    }
+    if ta <= 3 { return 1; }
+    let c = cmp_vals(doc, filter, a, b);
+    if c == -2 { return -1; }
+    if c == 0 { return 1; }
+    return 0;
+}
+
+fn contains_of(doc: text, filter: text, a: i64, b: i64) -> i64 {
+    if jj.v.vt[a] != jj.v.vt[b] {
+        return jqerr(typed(doc, filter, a) + " and " + typed(doc, filter, b) + " cannot have their containment checked");
+    }
+    let r = contains_in(doc, filter, a, b, 0);
+    if r < 0 { return -1; }
+    return mk_bool(r == 1);
+}
+
+fn keys_unsorted_of(doc: text, filter: text, v: i64) -> i64 {
+    let t = jj.v.vt[v];
+    if t == 6 { return keys_of(doc, filter, v); }
+    if t != 7 { return jqerr(typed(doc, filter, v) + " has no keys"); }
+    let o = built_of(doc, v);
+    if o < 0 { return -1; }
+    let out = arr_new();
+    if out < 0 { return -1; }
+    var p = jj.v.va[o];
+    while p >= 0 {
+        if !arr_push(out, jj.v.va[p]) { return -1; }
+        p = jj.v.vn[p];
+    }
+    return arr_done(out);
+}
+
+// ---- strings ----
+
+fn str_arg2(doc: text, filter: text, v: i64, x: i64, ends: bool) -> bool {
+    if jj.v.vt[v] != 5 || jj.v.vt[x] != 5 {
+        if ends { jqerr("endswith() requires string inputs"); } else { jqerr("startswith() requires string inputs"); }
+        return false;
+    }
+    return true;
+}
+
+fn string_fn2(doc: text, filter: text, id: i64, v: i64, x: i64) -> i64 {
+    if id == 102 || id == 103 {
+        if !str_arg2(doc, filter, v, x, id == 103) { return -1; }
+        let na = str_plain(doc, v, 0);
+        let nb = str_plain(doc, x, 2);
+        if nb > na { return jj.ev.hfalse; }
+        if id == 102 { return mk_bool(substr(jj.tmp, 0, nb) == jj.ev.tmp2); }
+        return mk_bool(substr(jj.tmp, na - nb, nb) == jj.ev.tmp2);
+    }
+    if id == 104 || id == 105 {
+        if !str_arg2(doc, filter, v, x, id == 105) { return -1; }
+        let na = str_plain(doc, v, 0);
+        let nb = str_plain(doc, x, 2);
+        if nb > na { return v; }
+        if id == 104 {
+            if substr(jj.tmp, 0, nb) != jj.ev.tmp2 { return v; }
+            jj.tmp = substr(jj.tmp, nb, na - nb);
+        } else {
+            if substr(jj.tmp, na - nb, nb) != jj.ev.tmp2 { return v; }
+            jj.tmp = substr(jj.tmp, 0, na - nb);
+        }
+        return str_from_tmp();
+    }
+    // 106 split
+    if jj.v.vt[v] != 5 || jj.v.vt[x] != 5 { return jqerr("split input and separator must be strings"); }
+    if jj.v.vt[x] == 5 && str_plain(doc, x, 2) == 0 && str_plain(doc, v, 0) > 0 { return split_chars(doc, v); }
+    return split_string(doc, filter, v, x);
+}
+
+// split with an empty separator: the characters
+fn split_chars(doc: text, v: i64) -> i64 {
+    let n = str_plain(doc, v, 0);
+    let out = arr_new();
+    if out < 0 { return -1; }
+    var i = 0;
+    while i < n {
+        var j = i + 1;
+        while j < n && (byte_at(jj.tmp, j) & 192) == 128 { j += 1; }
+        let off = len(jj.ev.scr);
+        if off + (j - i) > 16000000 { return fatal("strings built by the filter exceed the 16 MB scratch string"); }
+        jj.ev.scr += substr(jj.tmp, i, j - i);
+        let c = ent(5, 2, off, j - i);
+        if c < 0 { return -1; }
+        if !arr_push(out, c) { return -1; }
+        i = j;
+    }
+    return arr_done(out);
+}
+
+fn is_ws(c: i64) -> bool {
+    return c == 32 || c == 9 || c == 10 || c == 11 || c == 12 || c == 13;
+}
+
+// the byte length of the whitespace character (jq's trim set) starting at i, or 0
+fn ws_at(t: text, i: i64, n: i64) -> i64 {
+    let c = byte_at(t, i);
+    if is_ws(c) { return 1; }
+    if c == 194 && i + 1 < n { let d = byte_at(t, i + 1); if d == 133 || d == 160 { return 2; } return 0; }
+    if c == 225 && i + 2 < n && byte_at(t, i + 1) == 154 && byte_at(t, i + 2) == 128 { return 3; }
+    if c == 226 && i + 2 < n {
+        let d = byte_at(t, i + 1);
+        let e = byte_at(t, i + 2);
+        if d == 128 && ((e >= 128 && e <= 138) || e == 168 || e == 169 || e == 175) { return 3; }
+        if d == 129 && e == 159 { return 3; }
+        return 0;
+    }
+    if c == 227 && i + 2 < n && byte_at(t, i + 1) == 128 && byte_at(t, i + 2) == 128 { return 3; }
+    return 0;
+}
+
+// the byte length of the whitespace character that ends at hi (exclusive), or 0
+fn ws_before(t: text, hi: i64, lo: i64) -> i64 {
+    if hi - 1 >= lo && is_ws(byte_at(t, hi - 1)) { return 1; }
+    if hi - 2 >= lo && ws_at(t, hi - 2, hi) == 2 { return 2; }
+    if hi - 3 >= lo && ws_at(t, hi - 3, hi) == 3 { return 3; }
+    return 0;
+}
+
+fn string_fn1(doc: text, filter: text, id: i64, v: i64) -> i64 {
+    if jj.v.vt[v] != 5 {
+        if id == 26 || id == 27 { return jqerr("explode input must be a string"); }
+        if id == 28 { return jqerr(typed(doc, filter, v) + " only strings have UTF-8 byte length"); }
+        return jqerr("trim input must be a string");
+    }
+    let n = str_plain(doc, v, 0);
+    if id == 28 { return ent(4, 4, n, 0); }
+    if id >= 30 && id <= 32 {
+        var lo = 0;
+        var hi = n;
+        if id != 32 { while lo < hi && ws_at(jj.tmp, lo, hi) > 0 { lo += ws_at(jj.tmp, lo, hi); } }
+        if id != 31 { while hi > lo && ws_before(jj.tmp, hi, lo) > 0 { hi -= ws_before(jj.tmp, hi, lo); } }
+        if lo == 0 && hi == n { return v; }
+        jj.tmp = substr(jj.tmp, lo, hi - lo);
+        return str_from_tmp();
+    }
+    // ascii_downcase 26, ascii_upcase 27: letters by ASCII only, other bytes as they are
+    jj.ev.tmp3 = "";
+    var rs = 0;
+    var i = 0;
+    while i < n {
+        let c = byte_at(jj.tmp, i);
+        var nc = c;
+        if id == 26 && c >= 65 && c <= 90 { nc = c + 32; }
+        if id == 27 && c >= 97 && c <= 122 { nc = c - 32; }
+        if nc != c {
+            if i > rs { jj.ev.tmp3 += substr(jj.tmp, rs, i - rs); }
+            jj.ev.tmp3 += chr(nc);
+            rs = i + 1;
+        }
+        i += 1;
+    }
+    if rs == 0 { return v; }
+    if n > rs { jj.ev.tmp3 += substr(jj.tmp, rs, n - rs); }
+    jj.tmp = jj.ev.tmp3;
+    return str_from_tmp();
+}
+
+// ---- math ----
+
+fn num_in(doc: text, filter: text, v: i64) -> bool {
+    if jj.v.vt[v] != 4 { jqerr(typed(doc, filter, v) + " number required"); return false; }
+    return true;
+}
+
+fn math_fn1(doc: text, filter: text, id: i64, v: i64) -> i64 {
+    if id == 71 { let z = 0.0; return mk_dbl(1.0 / z); }
+    if id == 72 { let z = 0.0; return mk_dbl(z / z); }
+    if id == 33 {
+        if jj.v.vt[v] == 5 { return v; }
+        if jj.v.vt[v] != 4 { return jqerr(typed(doc, filter, v) + " cannot be negated"); }
+        let y = numd(doc, filter, v);
+        if !(y < 0.0) { return v; }
+        if jj.v.vs[v] == 3 { return mk_dbl(-y); }
+        if jj.v.vs[v] == 4 { return ent(4, 4, 0 - jj.v.va[v], 0); }
+        let c = ent(4, jj.v.vs[v], jj.v.va[v], jj.v.vb[v]);
+        if c < 0 { return -1; }
+        jj.v.vf[c] = 2;
+        return c;
+    }
+    if id >= 68 && id <= 70 && jj.v.vt[v] != 4 { return jj.ev.hfalse; }
+    if !num_in(doc, filter, v) { return -1; }
+    let x = numd(doc, filter, v);
+    if id == 50 { return mk_dbl(trunc(x)); }
+    if id == 51 { return mk_dbl(exp(x)); }
+    if id == 52 { return mk_dbl(pow(2.0, x)); }
+    if id == 53 { return mk_dbl(pow(10.0, x)); }
+    if id == 54 { return mk_dbl(ln(x)); }
+    if id == 55 { return mk_dbl(log2(x)); }
+    if id == 56 { return mk_dbl(log10(x)); }
+    if id == 57 { return mk_dbl(sin(x)); }
+    if id == 58 { return mk_dbl(cos(x)); }
+    if id == 59 { return mk_dbl(tan(x)); }
+    if id == 60 { return mk_dbl(asin(x)); }
+    if id == 61 { return mk_dbl(acos(x)); }
+    if id == 62 { return mk_dbl(atan(x)); }
+    if id == 63 { return mk_dbl(sinh(x)); }
+    if id == 64 { return mk_dbl(cosh(x)); }
+    if id == 65 { return mk_dbl(tanh(x)); }
+    if id == 66 { return mk_dbl(cbrt(x)); }
+    if id == 67 {
+        var r = round(x);
+        let d = x - trunc(x);
+        if d == 0.5 || d == -0.5 { r = 2.0 * round(x / 2.0); }
+        return mk_dbl(r);
+    }
+    if id == 68 { return mk_bool(x == x && (x - x) != (x - x)); }
+    if id == 69 { return mk_bool(x != x); }
+    // 70 isnormal
+    var ax = x;
+    if ax < 0.0 { ax = -ax; }
+    return mk_bool(x == x && (x - x) == 0.0 && ax >= pow(2.0, -1022.0));
+}
+
+fn math_fn2(doc: text, filter: text, id: i64, a: i64, b: i64) -> i64 {
+    if !num_in(doc, filter, a) { return -1; }
+    if !num_in(doc, filter, b) { return -1; }
+    let x = numd(doc, filter, a);
+    let y = numd(doc, filter, b);
+    if id == 200 { return mk_dbl(pow(x, y)); }
+    if id == 201 { return mk_dbl(atan2(x, y)); }
+    return mk_dbl(fmod(x, y));
+}
+
+// the builtins of one value that Stage 3 added
+fn lib_fn(doc: text, filter: text, id: i64, v: i64) -> i64 {
+    if id == 20 { return by_impl(doc, filter, v, -1, 0); }
+    if id == 21 { return reverse_of(doc, filter, v); }
+    if id == 22 { return by_impl(doc, filter, v, -1, 2); }
+    if id == 23 { return by_impl(doc, filter, v, -1, 3); }
+    if id == 24 { return by_impl(doc, filter, v, -1, 4); }
+    if id == 25 { return flatten_of(doc, filter, v, -1); }
+    if id == 29 { return keys_unsorted_of(doc, filter, v); }
+    if id >= 26 && id <= 32 { return string_fn1(doc, filter, id, v); }
+    return math_fn1(doc, filter, id, v);
+}
+
+// the builtins of an input and an argument (100..199) or of two arguments (200..)
+fn bc_fn2(doc: text, filter: text, id: i64, v: i64, x: i64) -> i64 {
+    if id >= 200 { return math_fn2(doc, filter, id, v, x); }
+    if id == 100 { return flatten_of(doc, filter, v, x); }
+    if id == 101 { return contains_of(doc, filter, v, x); }
+    if id >= 102 && id <= 106 { return string_fn2(doc, filter, id, v, x); }
+    return by_impl(doc, filter, v, x, id - 111);
+}
+
+// `v[k]` with a computed key
+fn didx_of(doc: text, filter: text, v: i64, k: i64) -> i64 {
+    let tv = jj.v.vt[v];
+    let tk = jj.v.vt[k];
+    if tk == 4 {
+        if tv == 1 { return jj.ev.hnull; }
+        let x = numd(doc, filter, k);
+        if x != x { return jj.ev.hnull; }
+        if x > 1000000000000.0 || x < -1000000000000.0 { return jj.ev.hnull; }
+        if tv != 6 {
+            let ts = tostring_of(doc, filter, k);
+            if ts < 0 { return -1; }
+            str_plain(doc, ts, 3);
+            return jqerr("Cannot index " + type_name(v) + " with number (" + jj.ev.tmp3 + ")");
+        }
+        var i = floor(x) as i64;
+        if tv == 6 && i < 0 { i = i + jj.v.vf[v]; }
+        if tv == 6 && i < 0 { return jj.ev.hnull; }
+        return nav_idx(doc, v, i);
+    }
+    if tk == 5 {
+        if tv == 1 { return jj.ev.hnull; }
+        if tv != 7 {
+            str_plain(doc, k, 3);
+            return jqerr("Cannot index " + type_name(v) + " with string (\"" + jj.ev.tmp3 + "\")");
+        }
+        let o = built_of(doc, v);
+        if o < 0 { return -1; }
+        let r = obj_get(doc, o, k);
+        if r < 0 { return jj.ev.hnull; }
+        return r;
+    }
+    if tk == 1 && tv == 1 { return jj.ev.hnull; }
+    if tk == 7 && (tv == 6 || tv == 5 || tv == 1) { return fatal("indexing with a slice object `.[{start, end}]`"); }
+    if tk == 6 && tv == 6 { return fatal("indexing an array with an array `.[[...]]`"); }
+    return jqerr("Cannot index " + type_name(v) + " with " + type_name(k));
+}

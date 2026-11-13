@@ -32,6 +32,8 @@ fn opname(op: i64) -> text {
     if op == Op.SLICE { return "SLICE"; }
     if op == Op.FN { return "FN"; }
     if op == Op.HAS { return "HAS"; }
+    if op == Op.DIDX { return "DIDX"; }
+    if op == Op.FN2 { return "FN2"; }
     if op == Op.TYPEMASK { return "TYPEMASK"; }
     if op == Op.OBJB { return "OBJB"; }
     if op == Op.OBJCK { return "OBJCK"; }

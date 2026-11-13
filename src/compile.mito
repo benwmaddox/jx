@@ -12,7 +12,7 @@ const K {
     ALT: i64 = 9; BIN: i64 = 10; AND: i64 = 11; OR: i64 = 12; NEG: i64 = 13; IF: i64 = 14; ARR: i64 = 15; OBJ: i64 = 16;
     FN: i64 = 17; SELECT: i64 = 18; EMPTY: i64 = 19; CMPLIT: i64 = 20; FOLD: i64 = 21; PLAY: i64 = 22;
     TRY: i64 = 23; VAR: i64 = 24; AS: i64 = 25; VARBIND: i64 = 26; REDUCE: i64 = 27; RBIND: i64 = 28; RANGE: i64 = 29;
-    LIMIT: i64 = 30; UNTIL: i64 = 31; ERROR: i64 = 32; SLICE: i64 = 33; FOREACH: i64 = 34; FBIND: i64 = 35;
+    LIMIT: i64 = 30; UNTIL: i64 = 31; ERROR: i64 = 32; SLICE: i64 = 33; FOREACH: i64 = 34; FBIND: i64 = 35; DIDX: i64 = 36;
 }
 
 const F {
@@ -332,14 +332,14 @@ fn parse_postfix(f: text, t0: i64) -> i64 {
                 jj.cp = q + 1;
                 continue;
             }
-            if jj.f.ak[lo] == K.LIT && jj.v.vt[jj.f.aa[lo]] == 4 && jj.v.vs[jj.f.aa[lo]] == 4 { reject("a negative index (it needs the array's length)", q); return -1; }
-            reject("an index computed by an expression (dynamic indexing)", q);
-            return -1;
+            t = mk(K.DIDX, t, lo, 0, q);
+            jj.cp = q + 1;
+            continue;
         }
         if c == 63 {
             // `E?` catches the errors of the last step only: `.a.b?` is `.a | (.b)?`
             let tk = jj.f.ak[t];
-            if (tk == K.FIELD || tk == K.IDX || tk == K.ITER || tk == K.SLICE) && jj.f.ak[jj.f.aa[t]] != K.ID {
+            if (tk == K.FIELD || tk == K.IDX || tk == K.ITER || tk == K.SLICE || tk == K.DIDX) && jj.f.ak[jj.f.aa[t]] != K.ID {
                 let src = jj.f.aa[t];
                 let st = mk(tk, mk(K.ID, 0, 0, 0, q), jj.f.ab[t], jj.f.ac[t], q);
                 if st < 0 { return -1; }
@@ -606,10 +606,15 @@ fn var_hidden(i: i64) -> bool {
     return false;
 }
 
+fn src_text(s: i64) -> text {
+    if s == 1 { return substr(jj.pre, 0, len(jj.pre)); }
+    return substr(jj.ftxt, 0, len(jj.ftxt));
+}
+
 fn find_def(f: text, q: i64, e: i64, na: i64) -> i64 {
     var i = jj.f.ndef - 1;
     while i >= 0 {
-        if jj.f.dn_len[i] == e - q && jj.f.dnp[i] == na && !def_hidden(i) && substr(f, jj.f.dn_off[i], e - q) == substr(f, q, e - q) { return i; }
+        if jj.f.dn_len[i] == e - q && jj.f.dnp[i] == na && !def_hidden(i) && substr(src_text(jj.f.dsrc[i]), jj.f.dn_off[i], e - q) == substr(f, q, e - q) { return i; }
         i -= 1;
     }
     return -1;
@@ -617,7 +622,7 @@ fn find_def(f: text, q: i64, e: i64, na: i64) -> i64 {
 
 fn push_def(off: i64, ln: i64, np: i64, par: i64, body: i64, kind: i64) -> i64 {
     let i = jj.f.ndef;
-    if i >= 127 { jj.err = "jx: too many function definitions in the filter"; return -1; }
+    if i >= 255 { jj.err = "jx: too many function definitions in the filter"; return -1; }
     jj.f.ndef = i + 1;
     jj.f.dn_off[i] = off;
     jj.f.dn_len[i] = ln;
@@ -630,11 +635,14 @@ fn push_def(off: i64, ln: i64, np: i64, par: i64, body: i64, kind: i64) -> i64 {
     jj.f.dsv[i] = 0;
     jj.f.dsw[i] = -1;
     jj.f.dan[i] = -1;
+    jj.f.dsrc[i] = jj.cur_src;
+    jj.f.dasrc[i] = jj.cur_src;
     return i;
 }
 
-// `def name: body;` and `def name(a; $b): body;` followed by the rest of the expression, which sees the function
-fn parse_def(f: text) -> i64 {
+// the header and body of `def name: body;` or `def name(a; $b): body;` read from jj.cp (after `def`): registers the function and
+// returns the position after its `;`, or -1
+fn read_def(f: text) -> i64 {
     var q = skip_ws(f, jj.cp);
     var e = q;
     while is_name_char(byte_at(f, e)) { e += 1; }
@@ -661,13 +669,37 @@ fn parse_def(f: text) -> i64 {
     let en = skip_expr(f, body);
     if en < 0 || byte_at(f, en) != 59 { return syn1("a function definition ends with `;`", q); }
     if np > 8 { return rej1("more than 8 parameters in a function definition", q); }
-    let save = jj.f.ndef;
     let di = push_def(noff, nlen, np, par, body, 0);
     if di < 0 { return -1; }
-    jj.cp = en + 1;
+    return en + 1;
+}
+
+// `def ...;` followed by the rest of the expression, which sees the function
+fn parse_def(f: text) -> i64 {
+    let save = jj.f.ndef;
+    let after = read_def(f);
+    if after < 0 { return -1; }
+    jj.cp = after;
     let rest = parse_expr(f, 1);
     jj.f.ndef = save;
     return rest;
+}
+
+// the builtins written in jq: registered before the filter is parsed, so that a def of the filter can replace one
+fn load_prelude() -> i64 {
+    let f = src_text(1);
+    jj.cur_src = 1;
+    var q = 0;
+    while true {
+        q = skip_ws(f, q);
+        if byte_at(f, q) < 0 { break; }
+        if !is_word(f, q, "def") { return syn1("internal error in the prelude", q); }
+        jj.cp = q + 3;
+        q = read_def(f);
+        if q < 0 { return -1; }
+    }
+    jj.cur_src = 0;
+    return 0;
 }
 
 // a closure parameter used: its argument text is parsed again, where the call was made
@@ -681,8 +713,13 @@ fn expand_closure(f: text, ci: i64) -> i64 {
     jj.f.curw = w;
     jj.noas = 0;
     jj.f.xdepth += 1;
+    jj.pdepth += 1;
     jj.cp = jj.f.dbody[ci];
-    let r = parse_expr(f, 1);
+    let save_src = jj.cur_src;
+    jj.cur_src = jj.f.dasrc[ci];
+    let r = parse_expr(src_text(jj.cur_src), 1);
+    jj.cur_src = save_src;
+    jj.pdepth -= 1;
     jj.f.xdepth -= 1;
     jj.noas = save_as;
     jj.f.curw = save_w;
@@ -703,26 +740,31 @@ fn expand_def(f: text, di: i64, na: i64) -> i64 {
     // the parameters are closures; a `$p` is also a variable bound to every output of its argument
     var pq = jj.f.dpar[di];
     let ci0 = jj.f.ndef;
+    let dtext = src_text(jj.f.dsrc[di]);
+    let call_src = jj.cur_src;
     var p = 0;
     while p < na {
-        var q = skip_ws(f, pq);
+        var q = skip_ws(dtext, pq);
         var dl = 0;
-        if byte_at(f, q) == 36 { dl = 1; q += 1; }
+        if byte_at(dtext, q) == 36 { dl = 1; q += 1; }
         var e = q;
-        while is_name_char(byte_at(f, e)) { e += 1; }
+        while is_name_char(byte_at(dtext, e)) { e += 1; }
         let ci = push_def(q, e - q, 0, dl, jj.argp[p], 1);
         if ci < 0 { return -1; }
         jj.f.dsd[ci] = save_d;
         jj.f.dsv[ci] = save_v;
         jj.f.dsw[ci] = save_w;
-        pq = skip_ws(f, e);
-        if byte_at(f, pq) == 59 { pq += 1; }
+        jj.f.dsrc[ci] = jj.f.dsrc[di];
+        jj.f.dasrc[ci] = call_src;
+        pq = skip_ws(dtext, e);
+        if byte_at(dtext, pq) == 59 { pq += 1; }
         p += 1;
     }
     jj.f.curw = w;
     jj.noas = 0;
     jj.f.xdepth += 1;
     var ok = true;
+    jj.pdepth += 1;
     // the arguments of `$` parameters are parsed at the call site
     p = 0;
     while p < na && ok {
@@ -748,7 +790,7 @@ fn expand_def(f: text, di: i64, na: i64) -> i64 {
             else {
                 jj.f.vname_off[jj.f.nvar] = len(jj.f.keys);
                 jj.f.vname_len[jj.f.nvar] = jj.f.dn_len[ci];
-                jj.f.keys += substr(f, jj.f.dn_off[ci], jj.f.dn_len[ci]);
+                jj.f.keys += substr(dtext, jj.f.dn_off[ci], jj.f.dn_len[ci]);
                 jj.f.vslot[jj.f.nvar] = jj.f.dnv[ci];
                 jj.f.nvar += 1;
             }
@@ -758,12 +800,15 @@ fn expand_def(f: text, di: i64, na: i64) -> i64 {
     var b = -1;
     if ok {
         jj.cp = jj.f.dbody[di];
-        b = parse_expr(f, 1);
+        jj.cur_src = jj.f.dsrc[di];
+        b = parse_expr(dtext, 1);
         if b >= 0 {
-            let q = skip_ws(f, jj.cp);
-            if byte_at(f, q) != 59 { b = syn1("a function body ends with `;`", q); }
+            let q = skip_ws(dtext, jj.cp);
+            if byte_at(dtext, q) != 59 { b = syn1("a function body ends with `;`", q); }
         }
+        jj.cur_src = call_src;
     }
+    jj.pdepth -= 1;
     jj.f.xdepth -= 1;
     jj.noas = save_as;
     jj.f.curw = save_w;
@@ -1035,6 +1080,65 @@ fn parse_fold(f: text, q0: i64, fe: bool) -> i64 {
     return rn;
 }
 
+fn native_id(w: text) -> i64 {
+    if w == "sort" { return 20; }
+    if w == "reverse" { return 21; }
+    if w == "unique" { return 22; }
+    if w == "min" { return 23; }
+    if w == "max" { return 24; }
+    if w == "ascii_downcase" { return 26; }
+    if w == "ascii_upcase" { return 27; }
+    if w == "utf8bytelength" { return 28; }
+    if w == "keys_unsorted" { return 29; }
+    if w == "trim" { return 30; }
+    if w == "ltrim" { return 31; }
+    if w == "rtrim" { return 32; }
+    if w == "abs" { return 33; }
+    if w == "floor" { return 9; }
+    if w == "ceil" { return 10; }
+    if w == "round" { return 11; }
+    if w == "sqrt" { return 12; }
+    if w == "fabs" { return 13; }
+    if w == "tojson" { return 14; }
+    if w == "trunc" { return 50; }
+    if w == "exp" { return 51; }
+    if w == "exp2" { return 52; }
+    if w == "log" { return 54; }
+    if w == "log2" { return 55; }
+    if w == "log10" { return 56; }
+    if w == "sin" { return 57; }
+    if w == "cos" { return 58; }
+    if w == "tan" { return 59; }
+    if w == "asin" { return 60; }
+    if w == "acos" { return 61; }
+    if w == "atan" { return 62; }
+    if w == "sinh" { return 63; }
+    if w == "cosh" { return 64; }
+    if w == "tanh" { return 65; }
+    if w == "cbrt" { return 66; }
+    if w == "nearbyint" { return 67; }
+    if w == "isinfinite" { return 68; }
+    if w == "isnan" { return 69; }
+    if w == "isnormal" { return 70; }
+    if w == "infinite" { return 71; }
+    if w == "nan" { return 72; }
+    if w == "contains" { return 101; }
+    if w == "startswith" { return 102; }
+    if w == "endswith" { return 103; }
+    if w == "ltrimstr" { return 104; }
+    if w == "rtrimstr" { return 105; }
+    if w == "split" { return 106; }
+    if w == "_sort_by_impl" { return 111; }
+    if w == "_group_by_impl" { return 112; }
+    if w == "_unique_by_impl" { return 113; }
+    if w == "_min_by_impl" { return 114; }
+    if w == "_max_by_impl" { return 115; }
+    if w == "pow" { return 200; }
+    if w == "atan2" { return 201; }
+    if w == "fmod" { return 202; }
+    return 0;
+}
+
 fn parse_primary(f: text) -> i64 {
     let q = skip_ws(f, jj.cp);
     let c = byte_at(f, q);
@@ -1119,6 +1223,23 @@ fn parse_primary(f: text) -> i64 {
         if w != "try" && w != "reduce" && w != "foreach" && w != "def" && w != "label" {
             let uc = user_call(f, q, e);
             if uc != -2 { return uc; }
+        }
+        var nid = native_id(w);
+        if w == "flatten" {
+            nid = 25;
+            if byte_at(f, skip_ws(f, jj.cp)) == 40 { nid = 100; }
+        }
+        if nid > 0 {
+            if nid < 100 {
+                if !no_args(f, w) { return -1; }
+                return mk(K.FN, -1, -1, nid, q);
+            }
+            if nid < 200 {
+                if !parse_args(f, w, 1, 1) { return -1; }
+                return mk(K.FN, jj.pa[0], -1, nid, q);
+            }
+            if !parse_args(f, w, 2, 2) { return -1; }
+            return mk(K.FN, jj.pa[0], jj.pa[1], nid, q);
         }
         if w == "empty" { if !no_args(f, w) { return -1; } return mk(K.EMPTY, 0, 0, 0, q); }
         if w == "length" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.LENGTH, q); }
@@ -1344,6 +1465,14 @@ fn peek_op(f: text, q: i64) -> i64 {
 }
 
 fn parse_expr(f: text, minp: i64) -> i64 {
+    jj.pdepth += 1;
+    if jj.pdepth > 11 { jj.pdepth -= 1; return rej1("expressions or function calls nested more than 11 deep", jj.cp); }
+    let r = parse_expr0(f, minp);
+    jj.pdepth -= 1;
+    return r;
+}
+
+fn parse_expr0(f: text, minp: i64) -> i64 {
     var lhs = parse_unary(f);
     if lhs < 0 { return -1; }
     var last_cmp = false;
@@ -1429,6 +1558,7 @@ fn cls(e: i64) -> i64 {
         return 0;
     }
     if k == K.FIELD || k == K.IDX || k == K.SLICE { return cls(jj.f.aa[e]); }
+    if k == K.DIDX { if cls(jj.f.aa[e]) != 0 || cls(jj.f.ab[e]) != 0 { return 2; } return 0; }
     if k == K.PIPE {
         let a = cls(jj.f.aa[e]);
         let b = cls(jj.f.ab[e]);
@@ -1603,7 +1733,7 @@ fn walk_vars(e: i64) {
     }
     if k == K.IF { walk_vars(jj.f.aa[e]); walk_vars(jj.f.ab[e]); walk_vars(jj.f.ac[e]); return; }
     if k == K.RANGE { walk_vars(jj.f.aa[e]); walk_vars(jj.f.ab[e]); walk_vars(jj.f.ac[e]); return; }
-    if k == K.FN || k == K.LIMIT { if k == K.FN && jj.f.aa[e] < 0 { return; } walk_vars(jj.f.aa[e]); if k == K.LIMIT { walk_vars(jj.f.ab[e]); } return; }
+    if k == K.FN || k == K.LIMIT { if k == K.FN && jj.f.aa[e] < 0 { return; } walk_vars(jj.f.aa[e]); if k == K.LIMIT || (k == K.FN && jj.f.ac[e] >= 200) { walk_vars(jj.f.ab[e]); } return; }
     if k == K.ARR || k == K.FOLD { walk_vars(jj.f.aa[e]); return; }
     if k == K.FIELD || k == K.IDX || k == K.ITER || k == K.NEG || k == K.SELECT || k == K.ERROR { walk_vars(jj.f.aa[e]); return; }
     walk_vars(jj.f.aa[e]);
@@ -1950,6 +2080,13 @@ fn an(e: i64, ctx: i64, nxt: i64, direct: bool) -> i64 {
         copy_node(e, o0);
         return an(e, ctx, nxt, direct);
     }
+    if k == K.DIDX {
+        if cls(jj.f.aa[e]) != 0 { return reject("a generator before a computed index", jj.f.at[e]) - 3; }
+        if cls(jj.f.ab[e]) != 0 { return reject("a generator as a computed index", jj.f.at[e]) - 3; }
+        if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
+        if an(jj.f.ab[e], ctx, -1, false) == -2 { return -2; }
+        return -1;
+    }
     if k == K.SLICE {
         if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
         if jj.f.ab[e] >= 0 { if cls(jj.f.ab[e]) != 0 { return reject("a generator as a slice bound", jj.f.at[e]) - 3; } if an(jj.f.ab[e], ctx, -1, false) == -2 { return -2; } }
@@ -2037,7 +2174,18 @@ fn an(e: i64, ctx: i64, nxt: i64, direct: bool) -> i64 {
             jj.f.ac[e] = 1;
             return an(e, ctx, nxt, direct);
         }
+        if id >= 200 {
+            if cls(jj.f.aa[e]) != 0 || cls(jj.f.ab[e]) != 0 { return reject("a generator as an argument of a math function", jj.f.at[e]) - 3; }
+            if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
+            if an(jj.f.ab[e], ctx, -1, false) == -2 { return -2; }
+            return -1;
+        }
         want_node(ctx);
+        if id >= 100 {
+            if cls(jj.f.aa[e]) != 0 { return reject("a generator as an argument of a builtin", jj.f.at[e]) - 3; }
+            if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
+            return -1;
+        }
         if id == F.KEYS && ctx >= 0 { jj.f.wantkeys[ctx] = 1; }
         if id == F.HAS {
             let a = jj.f.aa[e];
@@ -2075,7 +2223,15 @@ fn compile(f: text) -> i64 {
     jj.f.nw = 0;
     jj.f.xdepth = 0;
     jj.pbn = 0;
+    jj.pdepth = 0;
     jj.cdepth = 0;
+    if len(f) > 60000 { return reject("a filter longer than 60000 bytes", 0); }
+    jj.ftxt = f;
+    jj.cur_src = 0;
+    jj.pre = "";
+    jj.pre += prelude_text();
+    if load_prelude() != 0 { return 1; }
+    jj.cur_src = 0;
     jj.cp = skip_ws(f, 0);
     if jj.cp >= len(f) { return reject("an empty filter", 0); }
     let root = parse_expr(f, 1);
@@ -2118,4 +2274,29 @@ fn compile(f: text) -> i64 {
         u += 1;
     }
     return 0;
+}
+
+// the builtins written in jq (each is parsed again at every call, with the arguments as closures)
+fn prelude_text() -> text {
+    return "def in(xs): . as $x | xs | has($x);" 
+        + "def inside(xs): . as $x | xs | contains($x);" 
+        + "def any(g; c): isempty(first(g | c | select(.))) | not;" 
+        + "def all(g; c): isempty(first(g | c | select(. | not)));" 
+        + "def any(f): isempty(first(.[] | f | select(.))) | not;" 
+        + "def all(f): isempty(first(.[] | f | select(. | not)));" 
+        + "def any: isempty(first(.[] | select(.))) | not;" 
+        + "def all: isempty(first(.[] | select(. | not)));" 
+        + "def join($x): reduce .[] as $i (null; (if . == null then \"\" else . + $x end) + ($i | if type == \"boolean\" or type == \"number\" then tojson elif . == null then \"\" else . end)) // \"\";" 
+        + "def to_entries: [keys_unsorted[] as $k | {key: $k, value: .[$k]}];" 
+        + "def sort_by(f): _sort_by_impl(map([f]));" 
+        + "def group_by(f): _group_by_impl(map([f]));" 
+        + "def unique_by(f): _unique_by_impl(map([f]));" 
+        + "def min_by(f): _min_by_impl(map([f]));" 
+        + "def max_by(f): _max_by_impl(map([f]));" 
+        + "def last: .[-1];" 
+        + "def nth($n): .[$n];" 
+        + "def trimstr($x): ltrimstr($x) | rtrimstr($x);" 
+        + "def finites: select(isinfinite or isnan | not);" 
+        + "def normals: select(isnormal);" 
+        + "def transpose: if . == [] then [] else . as $in | (map(length) | max) as $max | [range(0; $max) as $j | [range(0; $in | length) as $i | $in[$i][$j]]] end;";
 }

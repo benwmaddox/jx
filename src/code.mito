@@ -40,6 +40,8 @@ const Op {
     FN: i64 = 51;       // r[ia] = builtin id of r[ib]
     HAS: i64 = 52;      // r[ia] = r[ib] | has(r[ic])
     TYPEMASK: i64 = 53; // r[ia] = r[ib] is of a type in the mask id
+    DIDX: i64 = 54;     // r[ia] = r[ib][r[ic]] (a computed key or index)
+    FN2: i64 = 55;      // r[ia] = builtin id of r[ib] and r[ic]
     // 4 construction and collectors
     OBJB: i64 = 64;     // r[ia] = a new empty object
     OBJCK: i64 = 65;    // the key r[ia] must be a string

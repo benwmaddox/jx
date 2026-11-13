@@ -492,6 +492,11 @@ fn reg_clear(r: i64) {
 
 // a copy of entry h in the arena of depth d, with what it holds (a string of the scratch string moves to the persistent text)
 fn copy_deep(h: i64, d: i64) -> i64 {
+    return copy_deep_l(h, d, 0);
+}
+
+fn copy_deep_l(h: i64, d: i64, lvl: i64) -> i64 {
+    if lvl > 40 { return fatal("a value nested more than 40 levels deep is copied"); }
     let t = jj.v.vt[h];
     if t <= 3 { return h; }
     let save = jj.ev.depth;
@@ -516,7 +521,7 @@ fn copy_deep(h: i64, d: i64) -> i64 {
         while p >= 0 {
             var c = -1;
             if t == 6 {
-                c = copy_deep(p, d);
+                c = copy_deep_l(p, d, lvl + 1);
                 if c < 0 { return -1; }
                 if c == p || jj.v.vt[c] <= 3 {
                     // a constant: the chain needs its own entry
@@ -535,8 +540,8 @@ fn copy_deep(h: i64, d: i64) -> i64 {
                 c = ent(0, 0, 0, 0);
                 jj.ev.depth = save3;
                 if c < 0 { return -1; }
-                let kk = copy_deep(jj.v.va[p], d);
-                let vv = copy_deep(jj.v.vb[p], d);
+                let kk = copy_deep_l(jj.v.va[p], d, lvl + 1);
+                let vv = copy_deep_l(jj.v.vb[p], d, lvl + 1);
                 if kk < 0 || vv < 0 { return -1; }
                 jj.v.va[c] = kk;
                 jj.v.vb[c] = vv;
@@ -732,7 +737,8 @@ fn slice_of(doc: text, filter: text, s: i64, lo: i64, hi: i64) -> i64 {
     var de = nf;
     if jj.v.vt[lo] == 4 { ds = numd(doc, filter, lo); }
     if jj.v.vt[hi] == 4 { de = numd(doc, filter, hi); }
-    if ds != ds || de != de { return jqerr("Start and end indices of an array slice must be numbers"); }
+    if ds != ds { ds = 0.0; }
+    if de != de { de = nf; }
     if ds < 0.0 { ds = ds + nf; }
     if de < 0.0 { de = de + nf; }
     if ds < 0.0 { ds = 0.0; }
