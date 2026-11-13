@@ -130,7 +130,7 @@ S3_STR = ["ascii_downcase", "ascii_upcase", "tojson", "utf8bytelength", "trim", 
           'endswith("b")', 'split(",")', 'split("a")', 'trimstr("a")', "tostring", "length"]
 S3_COLL = ["sort", "unique", "reverse", "min", "max", "add", "flatten", "any", "all", "to_entries", "keys_unsorted", "transpose", "join(\",\")", "join(1)",
            "group_by(.)", "sort_by(.a)", "group_by(.a)", "unique_by(.a)", "min_by(.a)", "max_by(.a)", 'contains(["a"])', 'inside([1,"a"])', 'IN(1,"a")',
-           "flatten(1)", "map_values(.)", "from_entries", "with_entries(.)", "first", "last", "length"]
+           "flatten(1)", "map_values(.)", "map_values(length?)", "map_values(select(. != null))", "map({key: tostring, value: .}) | from_entries", "to_entries | from_entries", "with_entries(select(.value != null))", "map({k: tostring, value: .}) | from_entries?", "map({name: tostring, Value: .}) | from_entries", "map({Key: (.|tostring), v: .}) | from_entries", "from_entries", "with_entries(.)", "first", "last", "length"]
 S3_PAT = ["$x", "[$x, $y]", "{a: $x}", "{$a}", "[$x]", "{a: $x, b: $y}", "[$x, [$y]]", "{a: [$x]}"]
 
 

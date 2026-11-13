@@ -1092,6 +1092,7 @@ fn native_id(w: text) -> i64 {
     if w == "ascii_upcase" { return 27; }
     if w == "utf8bytelength" { return 28; }
     if w == "keys_unsorted" { return 29; }
+    if w == "from_entries" { return 34; }
     if w == "trim" { return 30; }
     if w == "ltrim" { return 31; }
     if w == "rtrim" { return 32; }
@@ -2285,6 +2286,8 @@ fn prelude_text() -> text {
         + "def _jv: if type == \"boolean\" or type == \"number\" then tojson elif . == null then \"\" else . end;" 
         + "def join($x): reduce .[] as $i (null; (if . == null then \"\" else . + $x end) + ($i | _jv)) // \"\";" 
         + "def to_entries: [keys_unsorted[] as $k | {key: $k, value: .[$k]}];" 
+        + "def with_entries(f): to_entries | map(f) | from_entries;" 
+        + "def map_values(f): if type == \"object\" then [to_entries[] | {key: .key, value: (.value | first(f))}] | from_entries else [.[] | first(f)] end;" 
         + "def sort_by(f): _sort_by_impl(map([f]));" 
         + "def group_by(f): _group_by_impl(map([f]));" 
         + "def unique_by(f): _unique_by_impl(map([f]));" 

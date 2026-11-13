@@ -43,7 +43,7 @@ A case can carry several tags, so rows overlap. `core` matches every case. Colum
 | interpolation | 11 | 9 | 0 | 2 | 0 | B | 5 | Later (proposal) | "a \(.x)" assembled in scratch; design stage 5 (about 1 day after tostring) |
 | input-inputs | 2 | 1 | 1 | 0 | 0 | D | 4 | Later (proposal) | input/inputs/debug/stderr: next document is a new scan; cheap in the driver (about 1 day), design stage 4 |
 | walk | 4 | 3 | 0 | 1 | 0 | C | 6 | Skip (proposal) | owner decision: needs a rebuilt tree of the node |
-| entries | 3 | 2 | 1 | 0 | 0 | B | 3 | Done (Stage 3): to_entries only; from_entries, with_entries, map_values rejected (parse nesting limit) | to_entries/from_entries/with_entries: key/value span pairs, design stage 3 |
+| entries | 3 | 2 | 1 | 0 | 0 | B | 3 | Done (Stage 3): to_entries, from_entries (native, jq 1.8.2 key/value variants), with_entries, map_values (nested map_values deeper than the parse limit is rejected) | to_entries/from_entries/with_entries: key/value span pairs, design stage 3 |
 | env | 0 | 0 | 0 | 0 | 0 | D | 3 | Stage 3 (proposal) | $ENV/env is a compile-time constant; under 1 hour |
 | formats | 7 | 7 | 0 | 0 | 0 | D | 5 | Later (proposal) | @csv/@tsv/@sh/@uri/@html/@base64 are output-side transforms on strings; cheap (about 1 day total) |
 | regex | 0 | 0 | 0 | 0 | 0 | B | 6 | Skip (proposal) | owner decision: regex skipped (needs an engine; Oniguruma semantics) |
