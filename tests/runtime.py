@@ -84,6 +84,10 @@ FILES["LONG3"] = b'[' + b"1," * 2047 + b'2]\n'; open(os.path.join(T, "LONG3"), "
 FILES["LONG4"] = b'[\n' + b"1," * 2047 + b'2]\n'; open(os.path.join(T, "LONG4"), "wb").write(FILES["LONG4"]); case(["-c", "input_line_number", "LONG4"])
 FILES["LONG5"] = b'{"a":1}' + b" " * 5000 + b'\n'; open(os.path.join(T, "LONG5"), "wb").write(FILES["LONG5"]); case(["-c", "input_line_number", "LONG5"])
 # debug and stderr (standard error compared exactly)
+for flt in ('first(.a[]|debug)', 'limit(1;.a[]|debug)', 'any(.a[]; debug|.>0)', 'isempty(.a[]|debug)', '[.a[]|debug]|length', '.a|map(debug)', '.a|map(select(debug > 1))', 'reduce .a[] as $x (0; $x|debug|.+1)', '.a|add|debug', '[range(3)|debug]', 'if (.a|debug|length)>1 then "y"|debug else "n" end', '.s|debug|ascii_upcase|debug', '(.a[0],.a[1])|debug', 'try error("x"|debug) catch .', '.a|sort_by(debug)', '.a|group_by(debug)', 'label $f | .a[] | debug | if . > 1 then break $f else . end', '[.a[]|(debug|empty)]', '[.a[] | debug(. + 1)]', '.a | length | debug("n") ', '.s | stderr | debug', '{a: (.a[]|debug)}', '[.a[], .a[]] | debug | length', 'def f: debug; .a | f | f', 'def f(g): g|debug; f(.a[])', '.a | to_entries | map(.value|debug)', 'foreach .a[] as $x (0; .+$x; debug)'):
+    # jq stops a generator early where jx evaluates every element it streams: jx refuses debug/stderr next to first, limit, any, all, isempty, label, nth
+    stops = any(w in flt for w in ("first", "limit", "any(", "all(", "isempty", "label", "nth"))
+    case(["-c", flt, "f.json"], err="reject" if stops else "exact")
 for flt in ("1|debug", '"a"|debug("x")', ".a|debug", "debug", "[.a[]|debug]", ".a[]|debug|.+1", "debug(.a)", "debug(.a[])", "debug(empty)", "debug(\"m\", \"n\")",
             ".a|debug|empty", "(.a|debug)|empty", "[.a[]|debug|empty]", ".s|debug|length", "{a:.a|debug}", ".a[0] as $x|$x|debug|.+$x", "[debug(1,2), 3]",
             "debug(.s|ascii_upcase)", ".|debug(.s)|.a", "try (.a|debug|error) catch .", ".a[] | debug(\"v=\\(.)\")", "debug(\"\\(.a)\")", "[.s,.s|debug]"):

@@ -2553,6 +2553,9 @@ fn compile(f: text) -> i64 {
     if len(f) > 60000 { return reject("a filter longer than 60000 bytes", 0); }
     jj.ftxt = f;
     jj.cur_src = 0;
+    if (mentions_word("debug") || mentions_word("stderr")) && (mentions_word("first") || mentions_word("limit") || mentions_word("any") || mentions_word("all") || mentions_word("isempty") || mentions_word("label") || mentions_word("nth")) {
+        return reject("`debug` or `stderr` together with first, limit, any, all, isempty, label or nth (jx runs every element of an array it streams where jq stops early)", 0);
+    }
     jj.pre = "";
     jj.pre += prelude_text();
     if load_prelude() != 0 { return 1; }
@@ -2665,6 +2668,22 @@ fn mentions_args() -> bool {
     let n = len(jj.ftxt);
     while i + 5 <= n {
         if byte_at(jj.ftxt, i) == 36 && byte_at(jj.ftxt, i + 1) == 65 && byte_at(jj.ftxt, i + 2) == 82 && byte_at(jj.ftxt, i + 3) == 71 && byte_at(jj.ftxt, i + 4) == 83 { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// does the filter text contain the name as a whole word
+fn mentions_word(w: text) -> bool {
+    let n = len(jj.ftxt);
+    let m = len(w);
+    var i = 0;
+    while i + m <= n {
+        if byte_at(jj.ftxt, i) == byte_at(w, 0) && substr(jj.ftxt, i, m) == w {
+            let before = i == 0 || !is_name_char(byte_at(jj.ftxt, i - 1));
+            let after = i + m >= n || !is_name_char(byte_at(jj.ftxt, i + m));
+            if before && after { return true; }
+        }
         i += 1;
     }
     return false;
