@@ -411,6 +411,7 @@ fn parse_postfix(f: text, t0: i64) -> i64 {
                     q = skip_ws(f, jj.cp);
                 }
                 if byte_at(f, q) != 93 { syntax("expected ] after the slice", q); return -1; }
+                if lo < 0 && hi < 0 { syntax("a slice needs a start or an end", q); return -1; }
                 t = mk(K.SLICE, t, lo, hi, q);
                 jj.cp = q + 1;
                 continue;

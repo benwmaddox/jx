@@ -10,8 +10,8 @@ root  entry 0001  input r4
 ### .a.b
 filter .a.b
 automaton
-  n0   .                           
-  n1   .a                          
+  n0   .
+  n1   .a
   n2   .a.b                         slot
 root  entry 0001  input r4
   0000  RET       0, 0, 0, 0               ; col 0
@@ -20,9 +20,9 @@ root  entry 0001  input r4
 ### .users[0].n
 filter .users[0].n
 automaton
-  n0   .                           
-  n1   .users                      
-  n2   .users[0]                   
+  n0   .
+  n1   .users
+  n2   .users[0]
   n3   .users[0].n                  slot
 root  entry 0001  input r4
   0000  RET       0, 0, 0, 0               ; col 0
@@ -76,9 +76,9 @@ root  entry 0001  input r9
 ### {n: .n, c: .addr.city}
 filter {n: .n, c: .addr.city}
 automaton
-  n0   .                           
+  n0   .
   n1   .n                           slot
-  n2   .addr                       
+  n2   .addr
   n3   .addr.city                   slot
 root  entry 0001  input r4
   0000  RET       0, 0, 0, 0               ; col 0
@@ -125,7 +125,7 @@ root  entry 0001  input r9
 ### .users | length
 filter .users | length
 automaton
-  n0   .                           
+  n0   .
   n1   .users                       slot
 root  entry 0001  input r4
   0000  RET       0, 0, 0, 0               ; col 0
@@ -310,7 +310,7 @@ root  entry 0001  input r8
 ### try .a catch 0
 filter try .a catch 0
 automaton
-  n0   .                           
+  n0   .
   n1   .a                           slot
 root  entry 0001  input r4
   0000  RET       0, 0, 0, 0               ; col 0
@@ -333,7 +333,7 @@ root  entry 0001  input r4
 ### .a as [$x, $y] | $x
 filter .a as [$x, $y] | $x
 automaton
-  n0   .                           
+  n0   .
   n1   .a                           slot
   n2   .a[0]                        slot
   n3   .a[1]                        slot
@@ -354,7 +354,7 @@ root  entry 0001  input r4
 ### def f(g): g | length; f(.users)
 filter def f(g): g | length; f(.users)
 automaton
-  n0   .                           
+  n0   .
   n1   .users                       slot
 root  entry 0001  input r4
   0000  RET       0, 0, 0, 0               ; col 0
@@ -365,7 +365,7 @@ root  entry 0001  input r4
 ### "x\(.a)y"
 filter "x\(.a)y"
 automaton
-  n0   .                           
+  n0   .
   n1   .a                           slot
 root  entry 0001  input r4
   0000  RET       0, 0, 0, 0               ; col 0
@@ -380,7 +380,7 @@ root  entry 0001  input r4
 ### .a | ascii_downcase
 filter .a | ascii_downcase
 automaton
-  n0   .                           
+  n0   .
   n1   .a                           slot
 root  entry 0001  input r4
   0000  RET       0, 0, 0, 0               ; col 0

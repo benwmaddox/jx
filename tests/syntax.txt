@@ -9,3 +9,4 @@ $x
 break $nolabel
 label | 1
 label $x 1
+.[:]

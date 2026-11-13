@@ -28,7 +28,7 @@ A case can carry several tags, so rows overlap. `core` matches every case. Colum
 | string-fns | 55 | 22 | 14 | 12 | 7 | B | 5 | Done (Stage 3): indices/index/rindex, explode/implode, fromjson (strict JSON), ltrimstr/rtrimstr/trimstr, split/1, trim; regex functions skipped by the owner | string functions on a captured string, results in scratch (about 2 days for the common ones) |
 | collectors | 80 | 55 | 3 | 12 | 10 | B | 3 | Done (Stage 3) | sort/group/unique/min/max/flatten: collector memory linear in count (about 3 days) |
 | paths | 34 | 11 | 18 | 0 | 5 | C | 6 | Skip (proposal) | owner decision: path/paths/getpath/setpath/delpaths/del/pick need positions and whole subtrees |
-| destructure | 33 | 12 | 3 | 18 | 0 | B | 3 | Done (Stage 3): patterns and `?//` (nested try alternatives); `?//` mixing array and object patterns is rejected (engine known issue, README) | patterns bind constant index/key paths |
+| destructure | 33 | 12 | 3 | 18 | 0 | B | 3 | Done (Stage 3): patterns and `?//` (nested try alternatives), including mixed array/object and nested patterns (mixed-shape engine bug fixed) | patterns bind constant index/key paths |
 | dynamic-index | 25 | 5 | 5 | 1 | 14 | C | 6 | Open (proposal) | .[$k], .[expr], has($k), in(): bounded re-scan of a captured node; static after inlining is free (about 2-3 days) |
 | keys-has | 58 | 40 | 8 | 6 | 4 | B | 2 | Stage 2 (proposal) | keys/type/length/map/select helpers on spans (types and counts) |
 | assign | 42 | 25 | 11 | 0 | 6 | C | 6 | Open (proposal) | `\|=`, `=`, `+=` need paths of the update target; static paths could be done at compile time (about 3-5 days), computed ones need a tree |
@@ -44,12 +44,12 @@ A case can carry several tags, so rows overlap. `core` matches every case. Colum
 | input-inputs | 2 | 1 | 1 | 0 | 0 | D | 4 | Later (proposal) | input/inputs/debug/stderr: next document is a new scan; cheap in the driver (about 1 day), design stage 4 |
 | walk | 4 | 3 | 0 | 1 | 0 | C | 6 | Skip (proposal) | owner decision: needs a rebuilt tree of the node |
 | entries | 3 | 2 | 1 | 0 | 0 | B | 3 | Done (Stage 3): to_entries, from_entries (native, jq 1.8.2 key/value variants), with_entries, map_values (nested map_values deeper than the parse limit is rejected) | to_entries/from_entries/with_entries: key/value span pairs, design stage 3 |
-| env | 0 | 0 | 0 | 0 | 0 | D | 3 | Stage 3 (proposal) | $ENV/env is a compile-time constant; under 1 hour |
+| env | 0 | 0 | 0 | 0 | 0 | D | 3 | Rejected: needs a Mitochondria runtime feature (no environment access) | $ENV/env is a compile-time constant; under 1 hour |
 | formats | 7 | 7 | 0 | 0 | 0 | D | 5 | Done (Stage 3): @text @json @csv @tsv @html @uri @sh @base64 @base64d, @fmt "..." | @csv/@tsv/@sh/@uri/@html/@base64 are output-side transforms on strings; cheap (about 1 day total) |
 | regex | 0 | 0 | 0 | 0 | 0 | B | 6 | Skip (proposal) | owner decision: regex skipped (needs an engine; Oniguruma semantics) |
 | tostream | 0 | 0 | 0 | 0 | 0 | C | 6 | Skip (proposal) | owner decision: tostream/fromstream/truncate_stream need a path stack and --stream style events |
 | recurse-dotdot | 3 | 3 | 0 | 0 | 0 | C | 6 | Open (proposal) | `..`/recurse/while/repeat: All-children demand and recursion; cheapest is `..` on a captured node (about 3 days) |
-| label-break | 7 | 7 | 0 | 0 | 0 | B | 3 | Later (proposal) | label/break is early exit from a generator (about 1 day on top of limit) |
+| label-break | 7 | 7 | 0 | 0 | 0 | B | 3 | Done (Stage 3): label/break as error {"__jq":N} caught by try, label frame resumes | label/break is early exit from a generator (about 1 day on top of limit) |
 
 Representative failing programs per tag (jq expected vs jaq; first three):
 
@@ -278,9 +278,9 @@ Probes that matched: tojson big int/literal, keys order, sort mixed types, ltrim
 | -c | same | 0/0 | D | Stage 2 (proposal) | output formatting, already in jx |
 | -r | same | 0/0 | D | Stage 2 (proposal) | raw strings, already in jx |
 | -j | same | 0/0 | D | Later (proposal) | raw without newline; trivial |
-| -a | unsupported | 0/2 | D | Later (proposal) | ASCII escapes on output; about 1 hour |
+| -a | unsupported | 0/2 | D | Done (Stage 3) | ASCII escapes on output; about 1 hour |
 | -n | same | 0/0 | D | Stage 3 (proposal) | null input; needed once the filter can run without a document |
-| -s | same | 0/0 | D | Later (proposal) | slurp wraps documents in an array (design stage 4) |
+| -s | same | 0/0 | D | Done (Stage 3): one document wrapped in an array; several documents error | slurp wraps documents in an array (design stage 4) |
 | -R | same | 0/0 | D | Later (proposal) | raw lines as strings; trivial in the driver |
 | -R -s | same | 0/0 | D | Later (proposal) | whole input as one string |
 | -R -n inputs | same | 0/0 | D | Later (proposal) | needs inputs |
@@ -300,17 +300,17 @@ Probes that matched: tojson big int/literal, keys order, sort mixed types, ltrim
 | --indent 1 | same | 0/0 | D | Stage 2 (proposal) | indented output (design stage 1) |
 | --indent 0 | same | 0/0 | D | Later (proposal) | indent variant |
 | --indent 9 | differs | 2/0 | D | Later (proposal) | error path for out-of-range indent |
-| -S | same | 0/0 | D | Later (proposal) | sort keys needs object capture (design stage 6) |
+| -S | same | 0/0 | D | Rejected: values are copied as spans, keys cannot be sorted without parsing | sort keys needs object capture (design stage 6) |
 | --stream | unsupported | 0/2 | D | Later (proposal) | natural fit for the scanner; needs a path stack (design stage 6) |
 | --stream-errors | unsupported | 0/2 | D | Skip (proposal) | rare |
 | --seq | unsupported | 0/2 | D | Skip (proposal) | RFC 7464 framing; rare |
-| -f file | same | 0/0 | D | Later (proposal) | read the filter from a file; trivial |
-| --from-file | same | 0/0 | D | Later (proposal) | same as -f |
+| -f file | same | 0/0 | D | Rejected: needs a Mitochondria runtime feature (file access) | read the filter from a file; trivial |
+| --from-file | same | 0/0 | D | Rejected: needs a Mitochondria runtime feature (file access) | same as -f |
 | file input | same | 0/0 | D | Stage 2 (proposal) | jx already reads files |
 | two input files | same | 0/0 | D | Stage 3 (proposal) | iterate documents of several files |
 | stdin as - | same | 0/0 | D | Later (proposal) | trivial |
 | -L | same | 0/0 | D | Skip (proposal) | module search path |
-| -C | differs | 0/0 | D | Later (proposal) | colors; cosmetic (jq and jaq differ in the default color table) |
+| -C | differs | 0/0 | D | Rejected: the writer copies spans | colors; cosmetic (jq and jaq differ in the default color table) |
 | -M | same | 0/0 | D | Later (proposal) | no-op without -C |
 | --raw-output0 | same | 0/0 | D | Later (proposal) | NUL separator; trivial |
 | --unbuffered | unsupported | 0/2 | D | Later (proposal) | flush per output; trivial |

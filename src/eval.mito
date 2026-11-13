@@ -740,7 +740,18 @@ fn cmp_objects(doc: text, filter: text, x: i64, y: i64) -> i64 {
 fn slice_of(doc: text, filter: text, s: i64, lo: i64, hi: i64) -> i64 {
     let t = jj.v.vt[s];
     if t == 1 { return jj.ev.hnull; }
-    if t != 5 && t != 6 { return jqerr("Cannot index " + type_name(s) + " with object"); }
+    if t != 5 && t != 6 {
+        // jq names the slice object: {"start":lo,"end":hi}
+        let ja = tojson_of(doc, filter, lo);
+        if ja < 0 { return -1; }
+        let jn = str_plain(doc, ja, 0);
+        jj.ev.tmp3 = "Cannot index " + type_name(s) + " with object ({" + chr(34) + "start" + chr(34) + ":" + substr(jj.tmp, 0, jn) + ",";
+        let jb = tojson_of(doc, filter, hi);
+        if jb < 0 { return -1; }
+        let jm = str_plain(doc, jb, 0);
+        jj.ev.tmp3 += chr(34) + "end" + chr(34) + ":" + substr(jj.tmp, 0, jm) + "})";
+        return jqerr(jj.ev.tmp3);
+    }
     if (jj.v.vt[lo] != 4 && jj.v.vt[lo] != 1) || (jj.v.vt[hi] != 4 && jj.v.vt[hi] != 1) { return jqerr("Start and end indices of an array slice must be numbers"); }
     var s2 = s;
     var n = 0;
