@@ -32,6 +32,7 @@ re-recorded only when their versions change: `python -I tools/jqcompat.py record
 |---|---|---|---|---|---|---|---|---|---|---|
 | jq 1.8.2 | 531 | 531 | 0 | 0 | 0 | 100.0% | 100.0% | 444 | 0 | 19 / 19 |
 | jaq 3.1.2 | 531 | 359 | 73 | 56 | 43 | 67.6% | 75.6% | 281 | 0 | 12 / 19 |
+| jx bytecode-final | 531 | 196 | 1 | 334 | 0 | 36.9% | 99.5% | 170 | 0 | 6 / 19 |
 | jx Stage 1 | 531 | 9 | 0 | 522 | 0 | 1.7% | 100.0% | 8 | 0 | 0 / 19 |
 | jx Stage 2 | 531 | 196 | 1 | 334 | 0 | 36.9% | 99.5% | 170 | 0 | 6 / 19 |
 | jx stage2-core | 531 | 196 | 1 | 334 | 0 | 36.9% | 99.5% | 170 | 0 | 6 / 19 |
@@ -45,44 +46,50 @@ re-recorded only when their versions change: `python -I tools/jqcompat.py record
 
 A case carries several tags, so rows overlap; `core` carries every case. What the tags mean: `docs/jq-feature-matrix.md`.
 
-| tag | cases | jq 1.8.2 | jaq 3.1.2 | jx Stage 1 | jx Stage 2 | jx stage2-core | jx stage2-newruntime | jx bytecode-s6 | jx bytecode-s7 |
-|---|---|---|---|---|---|---|---|---|---|
-| core | 531 | 531 | 359 | 9 | 196 | 196 | 196 | 196 | 196 |
-| construct | 267 | 267 | 186 | 0 | 109 | 109 | 109 | 109 | 109 |
-| arith | 195 | 195 | 123 | 0 | 89 | 89 | 89 | 89 | 89 |
-| comma-alt | 185 | 185 | 137 | 0 | 70 | 70 | 70 | 70 | 70 |
-| try-catch | 127 | 127 | 38 | 0 | 40 | 40 | 40 | 40 | 40 |
-| limit-first | 90 | 90 | 42 | 0 | 39 | 39 | 39 | 39 | 39 |
-| vars | 90 | 90 | 49 | 0 | 11 | 11 | 11 | 11 | 11 |
-| collectors | 80 | 80 | 55 | 0 | 0 | 0 | 0 | 0 | 0 |
-| keys-has | 58 | 58 | 40 | 0 | 19 | 19 | 19 | 19 | 19 |
-| string-fns | 55 | 55 | 22 | 0 | 4 | 4 | 4 | 4 | 4 |
-| assign | 42 | 42 | 25 | 0 | 0 | 0 | 0 | 0 | 0 |
-| conditional | 38 | 38 | 27 | 0 | 22 | 22 | 22 | 22 | 22 |
-| paths | 34 | 34 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
-| reduce-foreach | 32 | 32 | 17 | 0 | 2 | 2 | 2 | 2 | 2 |
-| destructure | 30 | 30 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
-| math | 28 | 28 | 15 | 0 | 0 | 0 | 0 | 0 | 0 |
-| dynamic-index | 25 | 25 | 5 | 0 | 6 | 6 | 6 | 6 | 6 |
-| number-literals | 20 | 20 | 7 | 0 | 7 | 7 | 7 | 7 | 7 |
-| funcdef | 17 | 17 | 15 | 0 | 0 | 0 | 0 | 0 | 0 |
-| dates | 14 | 14 | 7 | 0 | 0 | 0 | 0 | 0 | 0 |
-| modules | 13 | 13 | 5 | 0 | 1 | 1 | 1 | 1 | 1 |
-| interpolation | 10 | 10 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
-| formats | 7 | 7 | 7 | 0 | 0 | 0 | 0 | 0 | 0 |
-| label-break | 6 | 6 | 6 | 0 | 2 | 2 | 2 | 2 | 2 |
-| walk | 4 | 4 | 3 | 0 | 0 | 0 | 0 | 0 | 0 |
-| recurse-dotdot | 3 | 3 | 3 | 0 | 0 | 0 | 0 | 0 | 0 |
-| entries | 3 | 3 | 2 | 0 | 0 | 0 | 0 | 0 | 0 |
-| loc | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| input-inputs | 2 | 2 | 1 | 0 | 0 | 0 | 0 | 0 | 0 |
+| tag | cases | jq 1.8.2 | jaq 3.1.2 | jx bytecode-final | jx Stage 1 | jx Stage 2 | jx stage2-core | jx stage2-newruntime | jx bytecode-s6 | jx bytecode-s7 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| core | 531 | 531 | 359 | 196 | 9 | 196 | 196 | 196 | 196 | 196 |
+| construct | 267 | 267 | 186 | 109 | 0 | 109 | 109 | 109 | 109 | 109 |
+| arith | 195 | 195 | 123 | 89 | 0 | 89 | 89 | 89 | 89 | 89 |
+| comma-alt | 185 | 185 | 137 | 70 | 0 | 70 | 70 | 70 | 70 | 70 |
+| try-catch | 127 | 127 | 38 | 40 | 0 | 40 | 40 | 40 | 40 | 40 |
+| limit-first | 90 | 90 | 42 | 39 | 0 | 39 | 39 | 39 | 39 | 39 |
+| vars | 90 | 90 | 49 | 11 | 0 | 11 | 11 | 11 | 11 | 11 |
+| collectors | 80 | 80 | 55 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| keys-has | 58 | 58 | 40 | 19 | 0 | 19 | 19 | 19 | 19 | 19 |
+| string-fns | 55 | 55 | 22 | 4 | 0 | 4 | 4 | 4 | 4 | 4 |
+| assign | 42 | 42 | 25 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| conditional | 38 | 38 | 27 | 22 | 0 | 22 | 22 | 22 | 22 | 22 |
+| paths | 34 | 34 | 11 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| reduce-foreach | 32 | 32 | 17 | 2 | 0 | 2 | 2 | 2 | 2 | 2 |
+| destructure | 30 | 30 | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| math | 28 | 28 | 15 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| dynamic-index | 25 | 25 | 5 | 6 | 0 | 6 | 6 | 6 | 6 | 6 |
+| number-literals | 20 | 20 | 7 | 7 | 0 | 7 | 7 | 7 | 7 | 7 |
+| funcdef | 17 | 17 | 15 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| dates | 14 | 14 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| modules | 13 | 13 | 5 | 1 | 0 | 1 | 1 | 1 | 1 | 1 |
+| interpolation | 10 | 10 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| formats | 7 | 7 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| label-break | 6 | 6 | 6 | 2 | 0 | 2 | 2 | 2 | 2 | 2 |
+| walk | 4 | 4 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| recurse-dotdot | 3 | 3 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| entries | 3 | 3 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| loc | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| input-inputs | 2 | 2 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 
 ## 3. What changed since the previous stage
 
-**jx Stage 1** (first recorded stage; changes are counted from zero)
+**jx bytecode-final** (first recorded stage; changes are counted from zero)
 
-- tags with more passing cases: core +9 (9 of 531)
+- tags with more passing cases: core +196 (196 of 531); construct +109 (109 of 267); arith +89 (89 of 195); comma-alt +70 (70 of 185); try-catch +40 (40 of 127); limit-first +39 (39 of 90); vars +11 (11 of 90); keys-has +19 (19 of 58); string-fns +4 (4 of 55); conditional +22 (22 of 38); reduce-foreach +2 (2 of 32); dynamic-index +6 (6 of 25); number-literals +7 (7 of 20); modules +1 (1 of 13); label-break +2 (2 of 6)
 - tags with fewer passing cases (regressions): none
+
+**jx Stage 1**
+
+- tags with more passing cases: none
+- tags with fewer passing cases (regressions): core -187 (196 -> 9); construct -109 (109 -> 0); arith -89 (89 -> 0); comma-alt -70 (70 -> 0); try-catch -40 (40 -> 0); limit-first -39 (39 -> 0); vars -11 (11 -> 0); keys-has -19 (19 -> 0); string-fns -4 (4 -> 0); conditional -22 (22 -> 0); reduce-foreach -2 (2 -> 0); dynamic-index -6 (6 -> 0); number-literals -7 (7 -> 0); modules -1 (1 -> 0); label-break -2 (2 -> 0)
+- cases newly passing: 0; no longer passing: 193
 
 **jx Stage 2**
 
@@ -120,6 +127,7 @@ A case carries several tags, so rows overlap; `core` carries every case. What th
 |---|---|---|---|
 | jq 1.8.2 | 2026-11-12 | - | jq-1.8.2 |
 | jaq 3.1.2 | 2026-11-12 | - | jaq 3.1.2 |
+| jx bytecode-final | 2026-11-12 | 6065779 | - |
 | jx Stage 1 | 2026-11-12 | b28b3c7 | - |
 | jx Stage 2 | 2026-11-12 | 7765c44 | - |
 | jx stage2-core | 2026-11-12 | c43a621 | - |
@@ -135,6 +143,7 @@ Each stage's run times jx, jq and jaq again on the same machine (`tools/timing.p
 
 | stage | date | commit | `.users[0].n` | `.users \| length` | `.users[] \| select(.age >= 85) \| .n` | `.users[] \| .addr.city` | `.users[] \| {n: .n, c: .addr.city}` | `.users \| map(.age) \| add` | `[.users[] \| select(.age >= 85) \| .n] \| length` | `[.users[] \| try (.n \| tonumber) catch 0] \| length` | `.users \| length as $n \| $n * 2` | `[limit(3; .users[])] \| length` | `.users[] \| .age + 1` |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| bytecode-final | 2026-11-12 | 6065779 | 94 / 62 / 50 | 15 / 65 / 54 | 17 / 86 / 81 | 17 / 94 / 102 | 23 / 116 / 172 | 18 / 80 / 66 | 17 / 81 / 73 | 22 / 96 / 82 | 15 / 157 / 54 | 16 / 64 / 56 | 32 / 98 / 97 |
 | stage1 | 2026-11-12 | b28b3c7 | 10 / 91 / 51 | 16 / 95 / 55 | 19 / 116 / 81 | 19 / 122 / 105 | - | - | - | - | - | - | - |
 | stage2-core | 2026-11-12 | c43a621 | - | - | - | - | - | - | - | - | - | - | - |
 | stage2-newruntime | 2026-11-12 | d6ae638 | - | - | - | - | - | - | - | - | - | - | - |
@@ -146,6 +155,7 @@ Each stage's run times jx, jq and jaq again on the same machine (`tools/timing.p
 
 | stage | date | commit | `.users[0].n` | `.users \| length` | `.users[] \| select(.age >= 85) \| .n` | `.users[] \| .addr.city` | `.users[] \| {n: .n, c: .addr.city}` | `.users \| map(.age) \| add` | `[.users[] \| select(.age >= 85) \| .n] \| length` | `[.users[] \| try (.n \| tonumber) catch 0] \| length` | `.users \| length as $n \| $n * 2` | `[limit(3; .users[])] \| length` | `.users[] \| .age + 1` |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| bytecode-final | 2026-11-12 | 6065779 | 19 / 562 / 414 | 111 / 664 / 386 | 63 / 749 / 650 | 69 / 842 / 873 | 126 / 1033 / 1194 | 57 / 723 / 513 | 58 / 704 / 579 | 101 / 865 / 678 | 44 / 544 / 395 | 53 / 544 / 396 | 100 / 845 / 809 |
 | stage1 | 2026-11-12 | b28b3c7 | 19 / 585 / 399 | 67 / 579 / 400 | 97 / 775 / 664 | 92 / 857 / 871 | - | - | - | - | - | - | - |
 | stage2-core | 2026-11-12 | c43a621 | 90 / 808 / 464 | 94 / 616 / 406 | 103 / 742 / 632 | 114 / 834 / 870 | 202 / 1053 / 1208 | 93 / 722 / 509 | 96 / 706 / 585 | 140 / 868 / 681 | 83 / 542 / 392 | 90 / 546 / 393 | 145 / 855 / 816 |
 | stage2-newruntime | 2026-11-12 | d6ae638 | 16 / 531 / 378 | 43 / 531 / 377 | 59 / 719 / 627 | 72 / 809 / 842 | 151 / 1020 / 1177 | 56 / 717 / 496 | 57 / 692 / 566 | 102 / 860 / 671 | 43 / 533 / 388 | 50 / 533 / 393 | 101 / 835 / 809 |
@@ -161,6 +171,7 @@ Same runs as section 5 (`tools/timing.py`); cells are `jx / jq / jaq`. jq is the
 
 | stage | date | `.users[0].n` | `.users \| length` | `.users[] \| select(.age >= 85) \| .n` | `.users[] \| .addr.city` | `.users[] \| {n: .n, c: .addr.city}` | `.users \| map(.age) \| add` | `[.users[] \| select(.age >= 85) \| .n] \| length` | `[.users[] \| try (.n \| tonumber) catch 0] \| length` | `.users \| length as $n \| $n * 2` | `[limit(3; .users[])] \| length` | `.users[] \| .age + 1` |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
+| bytecode-final | 2026-11-12 | 27 / 39 / 43 | 27 / 39 / 43 | 27 / 39 / 43 | 28 / 39 / 43 | 28 / 39 / 43 | 27 / 40 / 44 | 27 / 39 / 43 | 27 / 40 / 44 | 27 / 39 / 43 | 28 / 39 / 43 | 27 / 39 / 43 |
 | stage2-core | 2026-11-12 | - | - | - | - | - | - | - | - | - | - | - |
 | stage2-newruntime | 2026-11-12 | - | - | - | - | - | - | - | - | - | - | - |
 | stage2 | 2026-11-12 | 27 / 39 / 43 | 27 / 39 / 43 | 27 / 39 / 43 | 27 / 39 / 43 | 28 / 39 / 43 | 27 / 40 / 44 | 27 / 39 / 43 | 27 / 40 / 44 | 27 / 39 / 43 | 28 / 39 / 43 | 27 / 39 / 43 |
@@ -171,6 +182,7 @@ Same runs as section 5 (`tools/timing.py`); cells are `jx / jq / jaq`. jq is the
 
 | stage | date | `.users[0].n` | `.users \| length` | `.users[] \| select(.age >= 85) \| .n` | `.users[] \| .addr.city` | `.users[] \| {n: .n, c: .addr.city}` | `.users \| map(.age) \| add` | `[.users[] \| select(.age >= 85) \| .n] \| length` | `[.users[] \| try (.n \| tonumber) catch 0] \| length` | `.users \| length as $n \| $n * 2` | `[limit(3; .users[])] \| length` | `.users[] \| .age + 1` |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
+| bytecode-final | 2026-11-12 | 42 / 325 / 336 | 42 / 325 / 336 | 43 / 325 / 336 | 46 / 325 / 336 | 55 / 325 / 335 | 42 / 330 / 337 | 42 / 327 / 336 | 42 / 330 / 336 | 42 / 325 / 336 | 50 / 325 / 336 | 43 / 325 / 336 |
 | stage2-core | 2026-11-12 | 46 / 325 / 336 | 46 / 325 / 336 | 47 / 325 / 336 | 50 / 325 / 336 | 59 / 325 / 335 | 47 / 330 / 337 | 47 / 326 / 336 | 47 / 330 / 336 | 47 / 325 / 336 | 55 / 325 / 336 | 48 / 325 / 336 |
 | stage2-newruntime | 2026-11-12 | 42 / 325 / 336 | 42 / 325 / 336 | 43 / 325 / 336 | 46 / 325 / 336 | 55 / 325 / 335 | 42 / 330 / 337 | 42 / 327 / 336 | 42 / 330 / 336 | 42 / 325 / 336 | 50 / 325 / 336 | 43 / 325 / 336 |
 | stage2 | 2026-11-12 | 42 / 325 / 336 | 42 / 325 / 336 | 43 / 325 / 336 | 46 / 325 / 336 | 55 / 325 / 335 | 42 / 330 / 337 | 42 / 327 / 336 | 42 / 330 / 336 | 42 / 325 / 336 | 50 / 325 / 336 | 43 / 325 / 336 |

@@ -166,6 +166,20 @@ the first element (0.2 s on the 529 MB document, which is the time to read stand
 | `.users | map(.age) | add` | 1.5 / 554 | 51.2 / 10486 | 24.8 / 10602 | 10 |
 | `[.users[] | select(.age >= 85) | .n] | length` | 1.6 / 554 | 48.2 / 10343 | 29.8 / 10602 | 7 |
 
+**529 MB document, final bytecode build** (commit 04ce47d built with the Mitochondria compiler at main b27b504; seconds / peak working set in MB, one run each, jq 1.8.2 and jaq 3.1.2; the tree column is the frozen Stage 2 tree build):
+
+| filter | bytecode s / MB | tree s / MB | jq s / MB | jaq s / MB |
+|---|---|---|---|---|
+| `.users[0].n` | 0.3 / 554 | 0.2 / 554 | 39.1 / 10333 | 18.8 / 10602 |
+| `.users | length` | 1.2 / 554 | 1.1 / 554 | 37.5 / 10333 | 18.4 / 10602 |
+| `.users[] | select(.age >= 85) | .n` | 1.7 / 567 | 1.7 / 566 | 50.0 / 10334 | 33.2 / 10602 |
+| `.users[] | .addr.city` | 1.9 / 630 | 2.0 / 630 | 56.3 / 10334 | 64.1 / 10602 |
+| `.users[] | {n: .n, c: .addr.city}` | 4.0 / 940 | 5.7 / 940 | 71.4 / 10334 | 82.7 / 10602 |
+| `.users | map(.age) | add` | 1.6 / 555 | 1.6 / 555 | 54.6 / 10487 | 25.4 / 10602 |
+| `[.users[] | select(.age >= 85) | .n] | length` | 1.7 / 555 | 1.6 / 554 | 51.2 / 10343 | 30.0 / 10602 |
+
+Output of the bytecode, tree and jaq builds is byte-identical on all seven (jq differs only by CRLF line ends). Verification of the final build: `tests/run.py` 30,595 pass, 1 known fail (`nums` `.age|tostring|tonumber`, the tree build fails it too), 3,186 expected differences, 46/46 rejects, 7/7 syntax, 27/27 options; `tests/bcdiff.py` against the tree build: 0 differences on the 33,782-case corpus and 12,000 fuzz cases (seeds 1-30 x 400); jq.test 196/531 (1 differ, 0 error); `tests/dump.py`: 36 golden `--dump-program` dumps.
+
 jx holds the input once (the 554 MB floor); `jq` builds the whole document (10.3 GB peak) and so does `jaq` (10.6 GB). The default build (clang -O3) is as fast as the one with the larger inlining budget now that
 Mitochondria emits `byte_at` as an inline load (`.users | length` on the 16 MB document: 60 ms, 67 ms for Stage 1 with the inlining flag), so `build.sh` no longer sets it (`INLINE=1 ./build.sh` still does).
 
