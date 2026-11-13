@@ -1185,7 +1185,7 @@ fn keys_of(doc: text, filter: text, v: i64) -> i64 {
     while p >= 0 {
         var kh = p;
         if jj.v.vs[v] == 1 { kh = jj.v.va[p]; }
-        if n >= 60 { return fatal("`keys` of an object with more than 60 keys"); }
+        if n >= 4000 { return fatal("`keys` of an object with more than 4000 keys"); }
         // insert in order
         var pos = n;
         while pos > 0 {

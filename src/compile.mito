@@ -171,7 +171,7 @@ fn parse_format(f: text, q: i64) -> i64 {
     while is_name_char(byte_at(f, e)) { e += 1; }
     let id = format_id(f, e, q);
     if id < 0 { return syn1(substr(f, q + 1, e - q - 1) + " is not a valid format", q); }
-    let q2 = skip_ws(f, e);
+    let q2 = fskip(f, e);
     if byte_at(f, q2) == 34 { return parse_string(f, q2, id); }
     jj.cp = e;
     if id == 0 { return mk(K.FN, -1, -1, F.TOSTRING, q); }
@@ -225,7 +225,7 @@ fn parse_string(f: text, q: i64, fmt: i64) -> i64 {
         jj.cp = stop + 2;
         let e = parse_expr(f, 1);
         if e < 0 { return -1; }
-        let q2 = skip_ws(f, jj.cp);
+        let q2 = fskip(f, jj.cp);
         if byte_at(f, q2) != 41 { syntax("expected ) after the expression in a string", q2); return -1; }
         var ts = -1;
         if fmt == 0 { ts = mk(K.FN, -1, -1, F.TOSTRING, q); } else { ts = mk(K.FN, -1, -1, fmt, q); }
@@ -315,7 +315,7 @@ fn parse_key(f: text, q: i64) -> i64 {
 
 // the arguments of a builtin written (a; b; c): parsed into jj.pa, counted in jj.pn; false on error
 fn parse_args(f: text, name: text, lo: i64, hi: i64) -> bool {
-    var q = skip_ws(f, jj.cp);
+    var q = fskip(f, jj.cp);
     if byte_at(f, q) != 40 { syntax("`" + name + "` needs its arguments in parentheses", q); return false; }
     jj.cp = q + 1;
     var cnt = 0;
@@ -328,7 +328,7 @@ fn parse_args(f: text, name: text, lo: i64, hi: i64) -> bool {
         if cnt >= hi { reject("more than " + str(hi) + " arguments to `" + name + "`", q); return false; }
         if cnt == 0 { a0 = a; } else if cnt == 1 { a1 = a; } else { a2 = a; }
         cnt += 1;
-        q = skip_ws(f, jj.cp);
+        q = fskip(f, jj.cp);
         if byte_at(f, q) == 59 { jj.cp = q + 1; continue; }
         if byte_at(f, q) == 41 { jj.cp = q + 1; break; }
         syntax("expected ; or ) in the arguments of `" + name + "`", q);
@@ -343,6 +343,30 @@ fn parse_args(f: text, name: text, lo: i64, hi: i64) -> bool {
 }
 
 // the variable named keys[...] in scope, else -1
+// whitespace and comments of the filter text: `#` to the end of the line, and past a line break that follows an odd number of backslashes
+// (jq 1.8's comments; a CR before the LF counts as part of the break, a lone CR is part of the comment)
+fn fskip(t: text, p: i64) -> i64 {
+    var i = p;
+    let n = len(t);
+    while i < n {
+        let c = byte_at(t, i);
+        if c == 35 {
+            while i < n {
+                if byte_at(t, i) == 10 {
+                    var b = i - 1;
+                    if b >= 0 && byte_at(t, b) == 13 { b -= 1; }
+                    var k = 0;
+                    while b >= 0 && byte_at(t, b) == 92 { k += 1; b -= 1; }
+                    if k % 2 == 0 { break; }
+                }
+                i += 1;
+            }
+        } else if c == 32 || c == 10 || c == 13 || c == 9 { i += 1; }
+        else { return i; }
+    }
+    return i;
+}
+
 fn find_var(f: text, q: i64, e: i64) -> i64 {
     var k = jj.f.nvar - 1;
     while k >= 0 {
@@ -374,10 +398,10 @@ fn parse_postfix(f: text, t0: i64) -> i64 {
             if is_digit(d) { syntax("a field name cannot start with a digit", q); return -1; }
             break;
         }
-        q = skip_ws(f, q);
+        q = fskip(f, q);
         c = byte_at(f, q);
         if c == 91 {
-            q = skip_ws(f, q + 1);
+            q = fskip(f, q + 1);
             let d = byte_at(f, q);
             if d == 93 {
                 t = mk(K.ITER, t, 0, 0, q);
@@ -387,7 +411,7 @@ fn parse_postfix(f: text, t0: i64) -> i64 {
             if d == 34 {
                 let ko = parse_key(f, q);
                 if ko < 0 { return -1; }
-                q = skip_ws(f, jj.cp);
+                q = fskip(f, jj.cp);
                 if byte_at(f, q) != 93 { syntax("expected ] after the key", q); return -1; }
                 t = mk(K.FIELD, t, ko, len(jj.f.keys) - ko, q);
                 jj.cp = q + 1;
@@ -399,16 +423,16 @@ fn parse_postfix(f: text, t0: i64) -> i64 {
                 jj.cp = q;
                 lo = parse_expr(f, 1);
                 if lo < 0 { return -1; }
-                q = skip_ws(f, jj.cp);
+                q = fskip(f, jj.cp);
             }
             if byte_at(f, q) == 58 {
                 var hi = -1;
-                q = skip_ws(f, q + 1);
+                q = fskip(f, q + 1);
                 if byte_at(f, q) != 93 {
                     jj.cp = q;
                     hi = parse_expr(f, 1);
                     if hi < 0 { return -1; }
-                    q = skip_ws(f, jj.cp);
+                    q = fskip(f, jj.cp);
                 }
                 if byte_at(f, q) != 93 { syntax("expected ] after the slice", q); return -1; }
                 if lo < 0 && hi < 0 { syntax("a slice needs a start or an end", q); return -1; }
@@ -460,10 +484,10 @@ fn parse_object(f: text, p0: i64) -> i64 {
     var cnt = 0;
     var head = -1;
     var tail = -1;
-    var q = skip_ws(f, jj.cp);
+    var q = fskip(f, jj.cp);
     if byte_at(f, q) == 125 { jj.cp = q + 1; return mk(K.OBJ, jj.f.nobj, 0, 0, p0); }
     while true {
-        q = skip_ws(f, q);
+        q = fskip(f, q);
         let c = byte_at(f, q);
         var key = -1;
         var shorthand = -1;
@@ -490,7 +514,7 @@ fn parse_object(f: text, p0: i64) -> i64 {
             jj.cp = q + 1;
             key = parse_expr(f, 1);
             if key < 0 { return -1; }
-            q = skip_ws(f, jj.cp);
+            q = fskip(f, jj.cp);
             if byte_at(f, q) != 41 { syntax("expected ) after the key", q); return -1; }
             q += 1;
         } else if c == 36 {
@@ -501,7 +525,7 @@ fn parse_object(f: text, p0: i64) -> i64 {
             if slot < 0 { return syn1("$" + substr(f, q + 1, e2 - q - 1) + " is not defined", q); }
             let vn = mk(K.VAR, 0, 0, slot, q);
             if vn < 0 { return -1; }
-            let q3 = skip_ws(f, e2);
+            let q3 = fskip(f, e2);
             if byte_at(f, q3) == 58 {
                 // {$x: v} is {($x): v}
                 key = vn;
@@ -519,15 +543,15 @@ fn parse_object(f: text, p0: i64) -> i64 {
         } else {
             return syn1("an object key must be a name, a string or (expression)", q);
         }
-        q = skip_ws(f, q);
+        q = fskip(f, q);
         var val = -1;
         if byte_at(f, q) == 58 {
-            jj.cp = skip_ws(f, q + 1);
+            jj.cp = fskip(f, q + 1);
             // an object value is a term, with unary minus and pipes between terms (jq's ExpD)
             var v = parse_expr(f, 3);
             if v < 0 { return -1; }
             while true {
-                let q2 = skip_ws(f, jj.cp);
+                let q2 = fskip(f, jj.cp);
                 if byte_at(f, q2) == 124 && byte_at(f, q2 + 1) != 61 {
                     jj.cp = q2 + 1;
                     let r = parse_expr(f, 3);
@@ -537,7 +561,7 @@ fn parse_object(f: text, p0: i64) -> i64 {
                 } else { break; }
             }
             val = v;
-            q = skip_ws(f, jj.cp);
+            q = fskip(f, jj.cp);
         } else {
             if shorthand < 0 { return syn1("expected : after the key", q); }
             val = shorthand;
@@ -569,12 +593,12 @@ fn parse_if(f: text, p0: i64) -> i64 {
     // after `if` or `elif`
     let c = parse_expr(f, 1);
     if c < 0 { return -1; }
-    var q = skip_ws(f, jj.cp);
+    var q = fskip(f, jj.cp);
     if !is_word(f, q, "then") { return syn1("expected `then`", q); }
     jj.cp = q + 4;
     let t = parse_expr(f, 1);
     if t < 0 { return -1; }
-    q = skip_ws(f, jj.cp);
+    q = fskip(f, jj.cp);
     var e = -1;
     if is_word(f, q, "elif") {
         jj.cp = q + 4;
@@ -586,7 +610,7 @@ fn parse_if(f: text, p0: i64) -> i64 {
         jj.cp = q + 4;
         e = parse_expr(f, 1);
         if e < 0 { return -1; }
-        q = skip_ws(f, jj.cp);
+        q = fskip(f, jj.cp);
     } else {
         e = mk(K.ID, 0, 0, 0, q);
     }
@@ -597,12 +621,12 @@ fn parse_if(f: text, p0: i64) -> i64 {
 
 // the arguments of a builtin: `(` expr `)`; the expression, or -1
 fn parse_arg(f: text, name: text) -> i64 {
-    var q = skip_ws(f, jj.cp);
+    var q = fskip(f, jj.cp);
     if byte_at(f, q) != 40 { syntax("`" + name + "` needs an argument in parentheses", q); return -1; }
     jj.cp = q + 1;
     let a = parse_expr(f, 1);
     if a < 0 { return -1; }
-    q = skip_ws(f, jj.cp);
+    q = fskip(f, jj.cp);
     if byte_at(f, q) == 59 { reject("a second argument to `" + name + "`", q); return -1; }
     if byte_at(f, q) != 41 { syntax("expected ) after the argument", q); return -1; }
     jj.cp = q + 1;
@@ -611,7 +635,7 @@ fn parse_arg(f: text, name: text) -> i64 {
 
 // a call without arguments must not have parentheses with arguments
 fn no_args(f: text, name: text) -> bool {
-    let q = skip_ws(f, jj.cp);
+    let q = fskip(f, jj.cp);
     if byte_at(f, q) == 40 { reject("`" + name + "(...)` with arguments", q); return false; }
     return true;
 }
@@ -740,13 +764,13 @@ fn push_def(off: i64, ln: i64, np: i64, par: i64, body: i64, kind: i64) -> i64 {
 // the header and body of `def name: body;` or `def name(a; $b): body;` read from jj.cp (after `def`): registers the function and
 // returns the position after its `;`, or -1
 fn read_def(f: text) -> i64 {
-    var q = skip_ws(f, jj.cp);
+    var q = fskip(f, jj.cp);
     var e = q;
     while is_name_char(byte_at(f, e)) { e += 1; }
     if e == q || !is_name_start(byte_at(f, q)) { return syn1("a function name is needed after `def`", q); }
     let noff = q;
     let nlen = e - q;
-    q = skip_ws(f, e);
+    q = fskip(f, e);
     var par = -1;
     var np = 0;
     if byte_at(f, q) == 40 {
@@ -757,7 +781,7 @@ fn read_def(f: text) -> i64 {
             if en < 0 { return syn1("unterminated parameter list", q); }
             np += 1;
             if byte_at(f, en) == 59 { pos = en + 1; continue; }
-            if byte_at(f, en) == 41 { q = skip_ws(f, en + 1); break; }
+            if byte_at(f, en) == 41 { q = fskip(f, en + 1); break; }
             return syn1("expected ) after the parameters", en);
         }
     }
@@ -788,7 +812,7 @@ fn load_prelude() -> i64 {
     jj.cur_src = 1;
     var q = 0;
     while true {
-        q = skip_ws(f, q);
+        q = fskip(f, q);
         if byte_at(f, q) < 0 { break; }
         if !is_word(f, q, "def") { return syn1("internal error in the prelude", q); }
         jj.cp = q + 3;
@@ -839,7 +863,7 @@ fn expand_def(f: text, di: i64, na: i64) -> i64 {
     let call_src = jj.cur_src;
     var p = 0;
     while p < na {
-        var q = skip_ws(dtext, pq);
+        var q = fskip(dtext, pq);
         var dl = 0;
         if byte_at(dtext, q) == 36 { dl = 1; q += 1; }
         var e = q;
@@ -851,7 +875,7 @@ fn expand_def(f: text, di: i64, na: i64) -> i64 {
         jj.f.dsw[ci] = save_w;
         jj.f.dsrc[ci] = jj.f.dsrc[di];
         jj.f.dasrc[ci] = call_src;
-        pq = skip_ws(dtext, e);
+        pq = fskip(dtext, e);
         if byte_at(dtext, pq) == 59 { pq += 1; }
         p += 1;
     }
@@ -897,7 +921,7 @@ fn expand_def(f: text, di: i64, na: i64) -> i64 {
         jj.cur_src = jj.f.dsrc[di];
         b = parse_expr(dtext, 1);
         if b >= 0 {
-            let q = skip_ws(dtext, jj.cp);
+            let q = fskip(dtext, jj.cp);
             if byte_at(dtext, q) != 59 { b = syn1("a function body ends with `;`", q); }
         }
         jj.cur_src = call_src;
@@ -922,7 +946,7 @@ fn expand_def(f: text, di: i64, na: i64) -> i64 {
 // a name followed by arguments in parentheses that is a user function or closure parameter: its expansion, or -2 when it is not one
 fn user_call(f: text, wq: i64, we: i64) -> i64 {
     if jj.f.ndef == 0 { return -2; }
-    let q = skip_ws(f, jj.cp);
+    let q = fskip(f, jj.cp);
     var na = 0;
     var after = jj.cp;
     if byte_at(f, q) == 40 {
@@ -976,7 +1000,7 @@ fn pat_bind(f: text, t: i64, depth: i64, q: i64, e: i64) -> bool {
 // a destructuring pattern `[p, ...]` or `{k: p, $v, "s": p}` matched against variable t (path steps below it in pstk); the names become variables
 fn parse_pat(f: text, t: i64, depth: i64) -> bool {
     if depth >= 8 { rej1("a pattern nested more than 8 levels", jj.cp); return false; }
-    var q = skip_ws(f, jj.cp);
+    var q = fskip(f, jj.cp);
     let c = byte_at(f, q);
     if c == 36 {
         var e = q + 1;
@@ -994,7 +1018,7 @@ fn parse_pat(f: text, t: i64, depth: i64) -> bool {
             jj.pstb[depth] = i;
             if !parse_pat(f, t, depth + 1) { return false; }
             i += 1;
-            q = skip_ws(f, jj.cp);
+            q = fskip(f, jj.cp);
             if byte_at(f, q) == 44 { jj.cp = q + 1; continue; }
             if byte_at(f, q) == 93 { jj.cp = q + 1; return true; }
             syn1("expected , or ] in a pattern", q);
@@ -1004,7 +1028,7 @@ fn parse_pat(f: text, t: i64, depth: i64) -> bool {
     if c == 123 {
         jj.cp = q + 1;
         while true {
-            q = skip_ws(f, jj.cp);
+            q = fskip(f, jj.cp);
             let d = byte_at(f, q);
             if d == 36 {
                 var e = q + 1;
@@ -1017,7 +1041,7 @@ fn parse_pat(f: text, t: i64, depth: i64) -> bool {
                 jj.pstc[depth] = e - q - 1;
                 if !pat_bind(f, t, depth + 1, q + 1, e) { return false; }
                 jj.cp = e;
-                let q2 = skip_ws(f, e);
+                let q2 = fskip(f, e);
                 if byte_at(f, q2) == 58 { rej1("`{$name: pattern}` (a variable and a pattern for the same key)", q2); return false; }
             } else if is_name_start(d) || d == 34 {
                 let ko = parse_key(f, q);
@@ -1025,7 +1049,7 @@ fn parse_pat(f: text, t: i64, depth: i64) -> bool {
                 jj.pstk[depth] = 1;
                 jj.pstb[depth] = ko;
                 jj.pstc[depth] = len(jj.f.keys) - ko;
-                let q2 = skip_ws(f, jj.cp);
+                let q2 = fskip(f, jj.cp);
                 if byte_at(f, q2) != 58 { syn1("expected : after the key in a pattern", q2); return false; }
                 jj.cp = q2 + 1;
                 if !parse_pat(f, t, depth + 1) { return false; }
@@ -1033,7 +1057,7 @@ fn parse_pat(f: text, t: i64, depth: i64) -> bool {
                 rej1("a computed key or an unsupported form in an object pattern", q);
                 return false;
             }
-            q = skip_ws(f, jj.cp);
+            q = fskip(f, jj.cp);
             if byte_at(f, q) == 44 { jj.cp = q + 1; continue; }
             if byte_at(f, q) == 125 { jj.cp = q + 1; return true; }
             syn1("expected , or } in a pattern", q);
@@ -1156,7 +1180,7 @@ fn parse_as_pattern(f: text, lhs: i64, q0: i64) -> i64 {
         jj.alt_e[npat] = jj.f.nvar;
         jj.alt_be[npat] = jj.pbn;
         npat += 1;
-        q2 = skip_ws(f, jj.cp);
+        q2 = fskip(f, jj.cp);
         if alt_pattern(f, q2) { jj.cp = q2 + 3; continue; }
         break;
     }
@@ -1186,9 +1210,9 @@ fn parse_fold(f: text, q0: i64, fe: bool) -> i64 {
     let src = parse_postfix(f, s0);
     jj.noas = jj.noas - 1;
     if src < 0 { return -1; }
-    var e = skip_ws(f, jj.cp);
+    var e = fskip(f, jj.cp);
     if !is_word(f, e, "as") { return syn1("expected `as` after the source", e); }
-    e = skip_ws(f, e + 2);
+    e = fskip(f, e + 2);
     if jj.f.nvars >= 60 { jj.err = "jx: too many variables in the filter"; return -1; }
     let slot = jj.f.nvars;
     jj.f.nvars += 1;
@@ -1214,7 +1238,7 @@ fn parse_fold(f: text, q0: i64, fe: bool) -> i64 {
         hi = jj.pbn;
     }
     let nvisible = jj.f.nvar;
-    let q2 = skip_ws(f, jj.cp);
+    let q2 = fskip(f, jj.cp);
     if alt_pattern(f, q2) { return rej1("destructuring alternatives `?//`", q2); }
     if byte_at(f, q2) != 40 { return syn1("expected ( after the variable of reduce/foreach", q2); }
     // init does not see the new variables
@@ -1226,7 +1250,7 @@ fn parse_fold(f: text, q0: i64, fe: bool) -> i64 {
     let init = parse_expr(f, 1);
     jj.f.curw = save_w;
     if init < 0 { return -1; }
-    let q3 = skip_ws(f, jj.cp);
+    let q3 = fskip(f, jj.cp);
     if byte_at(f, q3) != 59 { return syn1("expected ; after the initial value", q3); }
     jj.cp = q3 + 1;
     var upd = parse_expr(f, 1);
@@ -1234,7 +1258,7 @@ fn parse_fold(f: text, q0: i64, fe: bool) -> i64 {
     upd = wrap_bindings(upd, lo, hi, q0);
     if upd < 0 { return -1; }
     var ext = -1;
-    let q4 = skip_ws(f, jj.cp);
+    let q4 = fskip(f, jj.cp);
     if byte_at(f, q4) == 59 {
         if !fe { return rej1("a third argument to reduce", q4); }
         if hi > lo {
@@ -1255,7 +1279,7 @@ fn parse_fold(f: text, q0: i64, fe: bool) -> i64 {
             if ext < 0 { return -1; }
         }
     }
-    let q5 = skip_ws(f, jj.cp);
+    let q5 = fskip(f, jj.cp);
     if byte_at(f, q5) != 41 { return syn1("expected ) at the end of reduce/foreach", q5); }
     jj.cp = q5 + 1;
     jj.f.nvar = save_v;
@@ -1311,6 +1335,28 @@ fn native_id(w: text) -> i64 {
     if w == "tanh" { return 65; }
     if w == "cbrt" { return 66; }
     if w == "nearbyint" { return 67; }
+    if w == "exp10" { return 53; }
+    if w == "acosh" { return 73; }
+    if w == "asinh" { return 74; }
+    if w == "atanh" { return 75; }
+    if w == "expm1" { return 76; }
+    if w == "log1p" { return 77; }
+    if w == "logb" { return 78; }
+    if w == "rint" { return 79; }
+    if w == "significand" { return 80; }
+    if w == "gamma" { return 81; }
+    if w == "lgamma" { return 82; }
+    if w == "tgamma" { return 83; }
+    if w == "j0" { return 84; }
+    if w == "j1" { return 85; }
+    if w == "y0" { return 86; }
+    if w == "y1" { return 87; }
+    if w == "frexp" { return 88; }
+    if w == "modf" { return 89; }
+    if w == "lgamma_r" { return 90; }
+    if w == "debug" { return 91; }
+    if w == "stderr" { return 92; }
+    if w == "_fma" { return 93; }
     if w == "isinfinite" { return 68; }
     if w == "isnan" { return 69; }
     if w == "isnormal" { return 70; }
@@ -1330,11 +1376,22 @@ fn native_id(w: text) -> i64 {
     if w == "pow" { return 200; }
     if w == "atan2" { return 201; }
     if w == "fmod" { return 202; }
+    if w == "copysign" { return 203; }
+    if w == "drem" || w == "remainder" { return 204; }
+    if w == "nextafter" { return 205; }
+    if w == "nexttoward" { return 206; }
+    if w == "scalb" { return 207; }
+    if w == "scalbln" { return 208; }
+    if w == "ldexp" { return 209; }
+    if w == "fmin" { return 210; }
+    if w == "fmax" { return 211; }
+    if w == "hypot" { return 212; }
+    if w == "fdim" { return 213; }
     return 0;
 }
 
 fn parse_primary(f: text) -> i64 {
-    let q = skip_ws(f, jj.cp);
+    let q = fskip(f, jj.cp);
     let c = byte_at(f, q);
     if c < 0 { return syn1("unexpected end of the filter", q); }
     if c == 46 {
@@ -1363,7 +1420,7 @@ fn parse_primary(f: text) -> i64 {
         jj.cp = q + 1;
         let e = parse_expr(f, 1);
         if e < 0 { return -1; }
-        let q2 = skip_ws(f, jj.cp);
+        let q2 = fskip(f, jj.cp);
         if byte_at(f, q2) != 41 { syntax("expected )", q2); return -1; }
         jj.cp = q2 + 1;
         jj.paren_node = e;
@@ -1371,11 +1428,11 @@ fn parse_primary(f: text) -> i64 {
     }
     if c == 91 {
         jj.cp = q + 1;
-        let q2 = skip_ws(f, jj.cp);
+        let q2 = fskip(f, jj.cp);
         if byte_at(f, q2) == 93 { jj.cp = q2 + 1; return mk(K.ARR, -1, -1, -1, q); }
         let e = parse_expr(f, 1);
         if e < 0 { return -1; }
-        let q3 = skip_ws(f, jj.cp);
+        let q3 = fskip(f, jj.cp);
         if byte_at(f, q3) != 93 { syntax("expected ]", q3); return -1; }
         jj.cp = q3 + 1;
         return mk(K.ARR, e, -1, -1, q);
@@ -1391,7 +1448,6 @@ fn parse_primary(f: text) -> i64 {
         let slot = find_var(f, q + 1, e);
         if slot < 0 {
             if substr(f, q + 1, e - q - 1) == "__loc__" { return rej1("`$__loc__`", q); }
-            if substr(f, q + 1, e - q - 1) == "ENV" { return rej1("`$ENV`", q); }
             return syn1("$" + substr(f, q + 1, e - q - 1) + " is not defined", q);
         }
         jj.cp = e;
@@ -1415,7 +1471,7 @@ fn parse_primary(f: text) -> i64 {
         var nid = native_id(w);
         if w == "flatten" {
             nid = 25;
-            if byte_at(f, skip_ws(f, jj.cp)) == 40 { nid = 100; }
+            if byte_at(f, fskip(f, jj.cp)) == 40 { nid = 100; }
         }
         if nid > 0 {
             if nid < 100 {
@@ -1429,13 +1485,30 @@ fn parse_primary(f: text) -> i64 {
             if !parse_args(f, w, 2, 2) { return -1; }
             return mk(K.FN, jj.pa[0], jj.pa[1], nid, q);
         }
+        if w == "env" {
+            if !no_args(f, w) { return -1; }
+            let es = find_var("ENV", 0, 3);
+            if es < 0 { return syn1("env is not defined", q); }
+            return mk(K.VAR, 0, 0, es, q);
+        }
+        if w == "input_filename" {
+            if !no_args(f, w) { return -1; }
+            if jj.nullin { return mk(K.LIT, jj.ev.hnull, 0, 0, q); }
+            let lo = len(jj.f.lits);
+            if jj.nfile > 0 { jj.f.lits += substr(jj.argtxt, jj.file_o, jj.file_l); } else { jj.f.lits += "<stdin>"; }
+            return mk(K.LIT, new_const(5, 1, lo, len(jj.f.lits) - lo), 0, 0, q);
+        }
+        if w == "input_line_number" {
+            if !no_args(f, w) { return -1; }
+            return mk(K.LIT, new_const(4, 4, jj.inl, 0), 0, 0, q);
+        }
         if w == "empty" { if !no_args(f, w) { return -1; } return mk(K.EMPTY, 0, 0, 0, q); }
         if w == "length" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.LENGTH, q); }
         if w == "type" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.TYPE, q); }
         if w == "keys" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.KEYS, q); }
         if w == "not" { if !no_args(f, w) { return -1; } return mk(K.FN, -1, -1, F.NOT, q); }
         if w == "add" {
-            let q2 = skip_ws(f, jj.cp);
+            let q2 = fskip(f, jj.cp);
             if byte_at(f, q2) == 40 {
                 let a = parse_arg(f, w);
                 if a < 0 { return -1; }
@@ -1449,7 +1522,7 @@ fn parse_primary(f: text) -> i64 {
             let b = parse_unary(f);
             if b < 0 { return -1; }
             var h = -1;
-            let q2 = skip_ws(f, jj.cp);
+            let q2 = fskip(f, jj.cp);
             if is_word(f, q2, "catch") {
                 jj.cp = q2 + 5;
                 h = parse_unary(f);
@@ -1460,7 +1533,7 @@ fn parse_primary(f: text) -> i64 {
         if w == "label" || w == "break" {
             // `label $name | body` (the body is the rest of the pipe) and `break $name`: a label is a variable slot, so a body that breaks to
             // an outer label cannot be streamed (the unit that runs it could not stop the generator outside)
-            let ql = skip_ws(f, jj.cp);
+            let ql = fskip(f, jj.cp);
             if byte_at(f, ql) != 36 { return syn1("expected `$name` after `" + w + "`", ql); }
             let ns = ql + 1;
             var ne = ns;
@@ -1498,7 +1571,7 @@ fn parse_primary(f: text) -> i64 {
             if jj.nlab >= 16 { return rej1("more than 16 labels nested", q); }
             let sl = new_slot();
             if sl < 0 { return -1; }
-            let qb = skip_ws(f, ne);
+            let qb = fskip(f, ne);
             if byte_at(f, qb) != 124 { return syn1("expected `|` after the label", qb); }
             let ln = mk(K.LABEL, -1, -1, sl, q);
             if ln < 0 { return -1; }
@@ -1518,7 +1591,7 @@ fn parse_primary(f: text) -> i64 {
             return ln;
         }
         if w == "error" {
-            let q2 = skip_ws(f, jj.cp);
+            let q2 = fskip(f, jj.cp);
             if byte_at(f, q2) == 40 {
                 let a = parse_arg(f, w);
                 if a < 0 { return -1; }
@@ -1549,7 +1622,7 @@ fn parse_primary(f: text) -> i64 {
             return mk(K.UNTIL, jj.pa[0], jj.pa[1], 0, q);
         }
         if w == "last" {
-            let q2 = skip_ws(f, jj.cp);
+            let q2 = fskip(f, jj.cp);
             if byte_at(f, q2) != 40 { return rej1("`last` without an argument (it needs the array's length)", q); }
             if !parse_args(f, w, 1, 1) { return -1; }
             return mk(K.LIMIT, -1, jj.pa[0], 4, q);
@@ -1564,9 +1637,9 @@ fn parse_primary(f: text) -> i64 {
             let src = parse_postfix(f, s0);
             jj.noas = jj.noas - 1;
             if src < 0 { return -1; }
-            var e = skip_ws(f, jj.cp);
+            var e = fskip(f, jj.cp);
             if !is_word(f, e, "as") { return syn1("expected `as` in reduce", e); }
-            e = skip_ws(f, e + 2);
+            e = fskip(f, e + 2);
             if byte_at(f, e) != 36 { return rej1("destructuring patterns in reduce", e); }
             let ns = e + 1;
             e = ns;
@@ -1577,13 +1650,13 @@ fn parse_primary(f: text) -> i64 {
             let lo = len(jj.f.keys);
             jj.f.keys += substr(f, ns, e - ns);
             jj.cp = e;
-            let q2 = skip_ws(f, e);
+            let q2 = fskip(f, e);
             if byte_at(f, q2) != 40 { return syn1("expected ( after the reduce variable", q2); }
             // init is outside the scope of the variable, update inside
             jj.cp = q2 + 1;
             let init = parse_expr(f, 1);
             if init < 0 { return -1; }
-            let q3 = skip_ws(f, jj.cp);
+            let q3 = fskip(f, jj.cp);
             if byte_at(f, q3) != 59 { return syn1("expected ; in reduce", q3); }
             jj.cp = q3 + 1;
             let save = jj.f.nvar;
@@ -1594,7 +1667,7 @@ fn parse_primary(f: text) -> i64 {
             let upd = parse_expr(f, 1);
             jj.f.nvar = save;
             if upd < 0 { return -1; }
-            let q4 = skip_ws(f, jj.cp);
+            let q4 = fskip(f, jj.cp);
             if byte_at(f, q4) == 59 { return rej1("foreach-style extract in reduce", q4); }
             if byte_at(f, q4) != 41 { return syn1("expected ) after reduce", q4); }
             jj.cp = q4 + 1;
@@ -1626,7 +1699,7 @@ fn parse_primary(f: text) -> i64 {
             return mk(K.LIMIT, jj.pa[0], jj.pa[1], 6, q);
         }
         if w == "first" {
-            let q2 = skip_ws(f, jj.cp);
+            let q2 = fskip(f, jj.cp);
             if byte_at(f, q2) == 40 {
                 if !parse_args(f, w, 1, 1) { return -1; }
                 return mk(K.LIMIT, const_num(1), jj.pa[0], 1, q);
@@ -1661,7 +1734,7 @@ fn parse_primary(f: text) -> i64 {
 }
 
 fn parse_unary(f: text) -> i64 {
-    let q = skip_ws(f, jj.cp);
+    let q = fskip(f, jj.cp);
     if byte_at(f, q) == 45 {
         jj.cp = q + 1;
         let e = parse_unary(f);
@@ -1719,10 +1792,10 @@ fn parse_expr(f: text, minp: i64) -> i64 {
     if lhs < 0 { jj.pdepth -= 1; return -1; }
     var last_cmp = false;
     while true {
-        let q = skip_ws(f, jj.cp);
+        let q = fskip(f, jj.cp);
         if is_word(f, q, "as") && jj.noas == 0 {
             if minp > 1 { break; }
-            var e = skip_ws(f, q + 2);
+            var e = fskip(f, q + 2);
             if byte_at(f, e) == 91 || byte_at(f, e) == 123 {
                 jj.cp = e;
                 jj.pdepth -= 1; return parse_as_pattern(f, lhs, q); 
@@ -1737,8 +1810,8 @@ fn parse_expr(f: text, minp: i64) -> i64 {
             jj.f.nvars += 1;
             let lo = len(jj.f.keys);
             jj.f.keys += substr(f, ns, e - ns);
-            let q2 = skip_ws(f, e);
-            if alt_pattern(f, q2) { jj.cp = skip_ws(f, q + 2); jj.pdepth -= 1; return parse_as_pattern(f, lhs, q); }
+            let q2 = fskip(f, e);
+            if alt_pattern(f, q2) { jj.cp = fskip(f, q + 2); jj.pdepth -= 1; return parse_as_pattern(f, lhs, q); }
             if byte_at(f, q2) != 124 { jj.pdepth -= 1; return syn1("expected `|` after the variable", q2); }
             jj.cp = q2 + 1;
             let save = jj.f.nvar;
@@ -2485,13 +2558,13 @@ fn compile(f: text) -> i64 {
     if load_prelude() != 0 { return 1; }
     jj.cur_src = 0;
     if bind_cli_args() < 0 { if len(jj.err) == 0 { jj.err = "jx: internal error binding the arguments"; } return 1; }
-    jj.cp = skip_ws(f, 0);
+    jj.cp = fskip(f, 0);
     if jj.cp >= len(f) { return reject("an empty filter", 0); }
     var root = parse_expr(f, 1);
     if root < 0 { return 1; }
     root = wrap_cli_args(root);
     if root < 0 { return 1; }
-    let q = skip_ws(f, jj.cp);
+    let q = fskip(f, jj.cp);
     if byte_at(f, q) >= 0 { return syntax("unexpected `" + substr(f, q, 1) + "`", q); }
     // the expression tree must not nest deeper than the evaluator's recursion allows
     jj.f.root = root;
@@ -2535,13 +2608,17 @@ fn compile(f: text) -> i64 {
 
 // the argument range as a JSON string, appended to lits
 fn lits_quote(o: i64, l: i64) {
+    lits_quote_in(jj.argtxt, o, l);
+}
+
+fn lits_quote_in(t: text, o: i64, l: i64) {
     jj.f.lits += chr(34);
     var rs = o;
     var i = o;
     while i < o + l {
-        let c = byte_at(jj.argtxt, i);
+        let c = byte_at(t, i);
         if c == 34 || c == 92 || c < 32 {
-            if i > rs { jj.f.lits += substr(jj.argtxt, rs, i - rs); }
+            if i > rs { jj.f.lits += substr(t, rs, i - rs); }
             if c == 34 { jj.f.lits += chr(92) + chr(34); }
             else if c == 92 { jj.f.lits += chr(92) + chr(92); }
             else { jj.f.lits += chr(92) + "u00" + substr("0123456789abcdef", c / 16, 1) + substr("0123456789abcdef", c % 16, 1); }
@@ -2549,7 +2626,7 @@ fn lits_quote(o: i64, l: i64) {
         }
         i += 1;
     }
-    if o + l > rs { jj.f.lits += substr(jj.argtxt, rs, o + l - rs); }
+    if o + l > rs { jj.f.lits += substr(t, rs, o + l - rs); }
     jj.f.lits += chr(34);
 }
 
@@ -2593,13 +2670,115 @@ fn mentions_args() -> bool {
     return false;
 }
 
+fn mentions(w: text) -> bool {
+    let n = len(jj.ftxt);
+    let m = len(w);
+    var i = 0;
+    while i + m <= n {
+        if byte_at(jj.ftxt, i) == byte_at(w, 0) && substr(jj.ftxt, i, m) == w { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// room in lits for a text of n bytes and what is around it
+fn lits_room(n: i64, what: text) -> bool {
+    if len(jj.f.lits) + n + 64 > 4194304 {
+        jj.err = "jx: " + what + " is too large (4 MiB at most with the filter's literals)";
+        jj.exitc = 2;
+        return false;
+    }
+    return true;
+}
+
+// the file named by a --slurpfile or --rawfile option
+fn named_file(k: i64) -> text {
+    return or(read_file(substr(jj.argtxt, jj.nm_vo[k], jj.nm_vl[k]), 4294967295), "");
+}
+
+// the JSON text of all the values in a file: an array of them
+fn lits_slurp(d: text) {
+    jj.f.lits += "[";
+    let n = len(d);
+    var p = skip_ws(d, 0);
+    var first = true;
+    while p < n {
+        let e = val_end(d, p);
+        if !first { jj.f.lits += ","; }
+        first = false;
+        jj.f.lits += substr(d, p, e - p);
+        p = skip_ws(d, e);
+    }
+    jj.f.lits += "]";
+}
+
+// the value of a named argument as JSON text
+fn lits_named_json(i: i64) -> bool {
+    let kind = jj.nm_kind[i];
+    if kind == 1 { jj.f.lits += substr(jj.argtxt, jj.nm_vo[i], jj.nm_vl[i]); }
+    else if kind == 0 { lits_quote(jj.nm_vo[i], jj.nm_vl[i]); }
+    else {
+        let d = named_file(i);
+        if kind == 2 {
+            if !lits_room(6 * len(d), "a --rawfile file") { return false; }
+            lits_quote_in(d, 0, len(d));
+        } else {
+            if !lits_room(2 * len(d), "a --slurpfile file") { return false; }
+            lits_slurp(d);
+        }
+    }
+    return true;
+}
+
+// $ENV: the environment as an object
+fn env_json() -> bool {
+    let n = len(jj.envtxt);
+    if !lits_room(6 * n, "the environment") { return false; }
+    jj.f.lits += "{";
+    var first = true;
+    var s = 0;
+    while s < n {
+        var e = s;
+        while e < n && byte_at(jj.envtxt, e) != 0 { e += 1; }
+        var q = s;
+        while q < e && byte_at(jj.envtxt, q) != 61 { q += 1; }
+        if q < e && q > s {
+            if !first { jj.f.lits += ","; }
+            first = false;
+            lits_quote_in(jj.envtxt, s, q - s);
+            jj.f.lits += ":";
+            lits_quote_in(jj.envtxt, q + 1, e - q - 1);
+        }
+        s = e + 1;
+    }
+    jj.f.lits += "}";
+    return true;
+}
+
 fn bind_cli_args() -> i64 {
     var k = 0;
     while k < jj.nnamed {
         let lo = len(jj.f.lits);
-        jj.f.lits += substr(jj.argtxt, jj.nm_vo[k], jj.nm_vl[k]);
-        if bind_var(arg_node(lo, jj.nm_kind[k] == 1), jj.nm_no[k], jj.nm_nl[k], k) < 0 { return -1; }
+        let kind = jj.nm_kind[k];
+        if kind == 3 {
+            if !lits_room(2 * len(named_file(k)), "a --slurpfile file") { return -1; }
+            lits_slurp(named_file(k));
+        } else if kind == 2 {
+            let d = named_file(k);
+            if !lits_room(len(d), "a --rawfile file") { return -1; }
+            jj.f.lits += d;
+        } else { jj.f.lits += substr(jj.argtxt, jj.nm_vo[k], jj.nm_vl[k]); }
+        if bind_var(arg_node(lo, kind == 1 || kind == 3), jj.nm_no[k], jj.nm_nl[k], k) < 0 { return -1; }
         k += 1;
+    }
+    // $ENV (and env): the environment, only when the filter mentions it
+    jj.nm_slot[jj.nnamed + 1] = -1;
+    if mentions("ENV") || mentions("env") {
+        let lo = len(jj.f.lits);
+        if !env_json() { return -1; }
+        let an0 = len(jj.argtxt);
+        jj.argtxt += "ENV";
+        if bind_var(arg_node(lo, true), an0, 3, jj.nnamed + 1) < 0 { return -1; }
     }
     // $ARGS: {"positional": [...], "named": {...}}, only when the filter mentions it
     jj.nm_slot[jj.nnamed] = -1;
@@ -2618,7 +2797,7 @@ fn bind_cli_args() -> i64 {
         if i > 0 { jj.f.lits += ","; }
         lits_quote(jj.nm_no[i], jj.nm_nl[i]);
         jj.f.lits += ":";
-        if jj.nm_kind[i] == 1 { jj.f.lits += substr(jj.argtxt, jj.nm_vo[i], jj.nm_vl[i]); } else { lits_quote(jj.nm_vo[i], jj.nm_vl[i]); }
+        if !lits_named_json(i) { return -1; }
         i += 1;
     }
     jj.f.lits += "}}";
@@ -2630,7 +2809,7 @@ fn bind_cli_args() -> i64 {
 
 fn wrap_cli_args(root: i64) -> i64 {
     var r = root;
-    var k = jj.nnamed;
+    var k = jj.nnamed + 1;
     while k >= 0 && r >= 0 {
         if jj.nm_slot[k] >= 0 { r = mk(K.AS, jj.nm_node[k], r, jj.nm_slot[k], 0); }
         k -= 1;
@@ -2640,7 +2819,9 @@ fn wrap_cli_args(root: i64) -> i64 {
 
 // the builtins written in jq (each is parsed again at every call, with the arguments as closures)
 fn prelude_text() -> text {
-    return "def in(xs): . as $x | xs | has($x);" 
+    return "def in(xs): . as $x | xs | has($x);"
+        + "def debug(msg): (msg | debug | empty), .;"
+        + "def fma(a; b; c): c as $c | b as $b | a as $a | [$a, $b, $c] | _fma;" 
         + "def inside(xs): . as $x | xs | contains($x);" 
         + "def any(g; c): isempty(first(g | c | select(.))) | not;" 
         + "def all(g; c): isempty(first(g | c | select(. | not)));" 

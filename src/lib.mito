@@ -497,6 +497,7 @@ fn math_fn1(doc: text, filter: text, id: i64, v: i64) -> i64 {
     if id >= 68 && id <= 70 && jj.v.vt[v] != 4 { return jj.ev.hfalse; }
     if !num_in(doc, filter, v) { return -1; }
     let x = numd(doc, filter, v);
+    if id >= 73 && id <= 90 { return math_more(id, x); }
     if id == 50 { return mk_dbl(trunc(x)); }
     if id == 51 { return mk_dbl(exp(x)); }
     if id == 52 { return mk_dbl(pow(2.0, x)); }
@@ -528,6 +529,51 @@ fn math_fn1(doc: text, filter: text, id: i64, v: i64) -> i64 {
     return mk_bool(x == x && (x - x) == 0.0 && ax >= pow(2.0, -1022.0));
 }
 
+// the integer jq's `(int) x` gives on x86 (an out of range value or NaN is the smallest int), cut to what ldexp and scalbln take
+fn c_int(y: f64) -> f64 {
+    if y != y { return -100000.0; }
+    if y >= 2147483648.0 || y <= -2147483649.0 { return -100000.0; }
+    if y > 100000.0 { return 100000.0; }
+    if y < -100000.0 { return -100000.0; }
+    return trunc(y);
+}
+
+fn pair(a: i64, b: i64) -> i64 {
+    if a < 0 || b < 0 { return -1; }
+    let r = arr_new();
+    if r < 0 { return -1; }
+    if !arr_push(r, a) { return -1; }
+    if !arr_push(r, b) { return -1; }
+    return arr_done(r);
+}
+
+// the math functions of one number that are not in jq 1.8's core set (ids 73 to 90)
+fn math_more(id: i64, x: f64) -> i64 {
+    if id == 73 { return mk_dbl(acosh(x)); }
+    if id == 74 { return mk_dbl(asinh(x)); }
+    if id == 75 { return mk_dbl(atanh(x)); }
+    if id == 76 { return mk_dbl(expm1(x)); }
+    if id == 77 { return mk_dbl(log1p(x)); }
+    if id == 78 { return mk_dbl(logb(x)); }
+    if id == 79 { return mk_dbl(rint(x)); }
+    if id == 80 { return mk_dbl(significand(x)); }
+    if id == 81 || id == 82 { return mk_dbl(lgam(x)); }
+    if id == 83 { return mk_dbl(tgamma(x)); }
+    if id == 84 { return mk_dbl(j0(x)); }
+    if id == 85 { return mk_dbl(j1(x)); }
+    if id == 86 { return mk_dbl(y0(x)); }
+    if id == 87 { return mk_dbl(y1(x)); }
+    if id == 88 { return pair(mk_dbl(frexp_mantissa(x)), int_val(frexp_exponent(x))); }
+    if id == 89 { return pair(mk_dbl(modf_fraction(x)), mk_dbl(modf_integer(x))); }
+    return pair(mk_dbl(lgam(x)), int_val(lgamma_sign(x)));
+}
+
+// lgamma as glibc computes it for a large argument (the Windows library gives a wrong value for the largest doubles)
+fn lgam(x: f64) -> f64 {
+    if x >= 288230376151711744.0 { return x * (ln(x) - 1.0); }
+    return lgamma(x);
+}
+
 fn math_fn2(doc: text, filter: text, id: i64, a: i64, b: i64) -> i64 {
     if !num_in(doc, filter, a) { return -1; }
     if !num_in(doc, filter, b) { return -1; }
@@ -535,7 +581,55 @@ fn math_fn2(doc: text, filter: text, id: i64, a: i64, b: i64) -> i64 {
     let y = numd(doc, filter, b);
     if id == 200 { return mk_dbl(pow(x, y)); }
     if id == 201 { return mk_dbl(atan2(x, y)); }
+    if id == 203 { return mk_dbl(copysign(x, y)); }
+    if id == 204 { return mk_dbl(drem(x, y)); }
+    if id == 205 { return mk_dbl(nextafter(x, y)); }
+    if id == 206 { return mk_dbl(nexttoward(x, y)); }
+    if id == 207 { return mk_dbl(scalb(x, y)); }
+    if id == 208 { return mk_dbl(scalbln(x, c_int(y))); }
+    if id == 209 { return mk_dbl(ldexp(x, c_int(y))); }
+    if id == 210 { return mk_dbl(fmin(x, y)); }
+    if id == 211 { return mk_dbl(fmax(x, y)); }
+    if id == 212 { return mk_dbl(hypot(x, y)); }
+    if id == 213 {
+        if x != x || y != y { return mk_dbl(x + y); }
+        if x > y { return mk_dbl(x - y); }
+        return mk_dbl(0.0);
+    }
     return mk_dbl(fmod(x, y));
+}
+
+// fma over the array [a, b, c]
+fn fma_of(doc: text, filter: text, v: i64) -> i64 {
+    var p = jj.v.va[v];
+    var xs = 0.0;
+    var ys = 0.0;
+    var zs = 0.0;
+    var i = 0;
+    while p >= 0 {
+        if !num_in(doc, filter, p) { return -1; }
+        let d = numd(doc, filter, p);
+        if i == 0 { xs = d; } else if i == 1 { ys = d; } else { zs = d; }
+        i += 1;
+        p = jj.v.vn[p];
+    }
+    return mk_dbl(fma(xs, ys, zs));
+}
+
+// debug and stderr: the value goes to standard error and passes on unchanged. debug writes ["DEBUG:",value] and a line break,
+// stderr (jq 1.8) the text of a string as it is, any other value as compact JSON, and no line break
+fn stderr_of(doc: text, filter: text, v: i64, kind: i64) -> i64 {
+    if kind == 1 && jj.v.vt[v] == 5 {
+        let n = str_plain(doc, v, 0);
+        eprint(substr(jj.tmp, 0, n));
+        return v;
+    }
+    let m = len(jj.ev.scr);
+    if tojson_of(doc, filter, v) < 0 { return -1; }
+    let t = substr(jj.ev.scr, m, len(jj.ev.scr) - m);
+    if kind == 0 { eprint("[" + chr(34) + "DEBUG:" + chr(34) + "," + t + "]" + chr(10)); }
+    else { eprint(t); }
+    return v;
 }
 
 // the builtins of one value that Stage 3 added
@@ -1207,6 +1301,9 @@ fn lib_fn(doc: text, filter: text, id: i64, v: i64) -> i64 {
     if id == 25 { return flatten_of(doc, filter, v, -1); }
     if id == 29 { return keys_unsorted_of(doc, filter, v); }
     if id >= 26 && id <= 32 { return string_fn1(doc, filter, id, v); }
+    if id == 91 { return stderr_of(doc, filter, v, 0); }
+    if id == 92 { return stderr_of(doc, filter, v, 1); }
+    if id == 93 { return fma_of(doc, filter, v); }
     return math_fn1(doc, filter, id, v);
 }
 

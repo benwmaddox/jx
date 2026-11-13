@@ -9,8 +9,6 @@ getpath(["a"])
 .a |= 1
 .a += 1
 input
-$ENV
-env
 test("a")
 .. | .a
 not_a_function

@@ -130,7 +130,7 @@ nsyn = len(lines("syntax.txt"))
 # options: unknown or unsupported options are refused by name (jq exits 2; a program can only exit with 1)
 opt_ok = 0
 opt_cases = [(["-Z", ".a"], b"unknown option '-Z'"), ([".a", "-Z"], b"unknown option '-Z'"), (["-S", ".a"], b"'-S' is not supported yet"),
-             ([".a", "-S"], b"'-S' is not supported yet"), (["-f", ".a"], b"'-f' is not supported yet"),
+             ([".a", "-S"], b"'-S' is not supported yet"), (["-L", ".a"], b"'-L' is not supported yet"),
              (["-C", ".a"], b"'-C' is not supported yet"), (["--indent=4", ".a"], b"unknown option '--indent'"), (["--bogus", ".a"], b"unknown option '--bogus'"), ([".a", "--bogus"], b"unknown option '--bogus'"),
              (["--raw-output0", ".a"], b"'--raw-output0' is not supported yet"), ([".a", "--sort-keys"], b"'--sort-keys' is not supported yet"), (["-cS", ".a"], b"'-S' is not supported yet"), (["-cZ", ".a"], b"unknown option '-Z'"), ([".a", "other.json"], b"input files are not supported")]
 for args, want in opt_cases:
