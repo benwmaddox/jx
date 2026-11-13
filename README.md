@@ -147,6 +147,9 @@ Computed indexes (`.[$k]`, `.[expr]`, negative literal indexes) stay rejected in
 
 ## Results
 
+**529 MB document, stage3-shapefix build** (jx only, seconds / peak MB, one run each; jq and jaq numbers are the ones above): `.users[0].n` 0.2 / 554, `.users | length` 1.0 / 555, `select` 1.5 / 567, `{n: .n, c: .addr.city}` 4.4 / 940, `[label $o | .users[] | .age, break $o]` 1.4 / 802 (the label forces the whole array to be read as a value). `reduce .users[] as $u (0; . + $u.age)` fails on this document: `out of value memory at nesting depth 0` (the loop keeps 6.5 million element values; reduce over huge arrays is a known limit, fine on the 16 MB document).
+
+
 **jq.test** (jq 1.8.2's own test file, `python -I tests/jqtest.py`, details by tag in [docs/progress.md](docs/progress.md)): **196 of 531 runnable cases pass (36.9%)**, 1 differs, 0 error, 334 rejected
 at compile time; 6 of the 19 `%%FAIL` cases (programs that must not compile) also pass, 13 are accepted programs jx rejects as not supported, none is accepted wrongly. The one `differ` is `"x" * range(0;12;2) + "(a star)" * 8 | try -. catch .`:
 the filter contains a non-ASCII character, which the C runtime's narrow argv turns into `?` on Windows (expected difference above). Stage 1 passed 9. Of the 191 cases whose tags are all in the Stage 2 decision set
