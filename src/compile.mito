@@ -332,6 +332,12 @@ fn parse_postfix(f: text, t0: i64) -> i64 {
                 jj.cp = q + 1;
                 continue;
             }
+            if jj.cur_src == 0 {
+                // computed indexes are postponed by the owner: only the prelude (builtins written in jq) may use them
+                if jj.f.ak[lo] == K.LIT && jj.v.vt[jj.f.aa[lo]] == 4 && jj.v.vs[jj.f.aa[lo]] == 4 { reject("a negative index (it needs the array's length)", q); return -1; }
+                reject("an index computed by an expression (dynamic indexing)", q);
+                return -1;
+            }
             t = mk(K.DIDX, t, lo, 0, q);
             jj.cp = q + 1;
             continue;

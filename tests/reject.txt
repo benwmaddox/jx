@@ -2,48 +2,24 @@
 ..
 .[-1]
 .[.k]
-.users[] | .n | ascii_downcase
 @base64
 @csv
 "a \(.b)"
-reduce .users[] as $u (0; . + 1)
-foreach .a[] as $x (0; .)
-.users | sort
-.users | sort_by(.n)
-.users | unique
-.users | group_by(.a)
-to_entries
 with_entries(.)
 walk(.)
 paths
 getpath(["a"])
-tojson
 fromjson
-min
-max
 .a = 1
 .a |= 1
 .a += 1
-def f: 1; f
 input
 $ENV
 env
 test("a")
-ltrimstr("a")
-split(",")
-join(",")
-ascii_downcase
-any
-all
 .. | .a
 not_a_function
-
-floor
-sqrt
-.a | ceil
-reduce range(3) as $x (0; . + $x)
-. as [$a] | $a
-. as {a: $x} | $x
-def f: 1; f
-foreach range(3) as $x (0; . + $x)
-
+.[.a]
+. as $k | .[$k]
+.a[.b]
+.[1:2] | .[.[0]]

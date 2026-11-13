@@ -316,3 +316,47 @@ nth(1; .users[] | .n)
 .users[] | .addr.city?
 
 [.users[] | .age + 1 | until(. > 100; . * 2)]
+.users[] | .n | ascii_downcase
+reduce .users[] as $u (0; . + 1)
+foreach .a[] as $x (0; .)
+.users | sort
+.users | sort_by(.n)
+.users | unique
+.users | group_by(.a)
+to_entries
+tojson
+min
+max
+def f: 1; f
+ltrimstr("a")
+split(",")
+join(",")
+ascii_downcase
+any
+all
+floor
+sqrt
+.a | ceil
+reduce range(3) as $x (0; . + $x)
+. as [$a] | $a
+. as {a: $x} | $x
+foreach range(3) as $x (0; . + $x)
+.users | map(.n) | sort | reverse
+.users | sort_by(.age, .n) | map(.n)
+.users | min_by(.age) | .n
+.users | max_by(.age) | .n
+.users | group_by(.age) | map(length)
+[.users[] | .age] | unique | length
+.users | map(.age) | flatten
+.users[0] | to_entries | map(.key)
+.users[0] | keys_unsorted
+.users | any(.age > 50)
+.users | all(.age > 0)
+reduce .users[] as {age: $a} (0; . + $a)
+foreach .users[] as $u (0; . + 1; .)
+def f(g): [.users[] | g]; f(.age)
+[.users[] | .age | pow(.; 2) | sqrt]
+.users[0].n | startswith("a"), endswith("z"), contains("a")
+.users | map(.n) | join(",")
+.users | length | log10 | floor
+.users[0] | . as {n: $n, age: $a} | [$n, $a]
