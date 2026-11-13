@@ -35,6 +35,7 @@ re-recorded only when their versions change: `python -I tools/jqcompat.py record
 | jx Stage 1 | 531 | 9 | 0 | 522 | 0 | 1.7% | 100.0% | 8 | 0 | 0 / 19 |
 | jx Stage 2 | 531 | 196 | 1 | 334 | 0 | 36.9% | 99.5% | 170 | 0 | 6 / 19 |
 | jx stage2-core | 531 | 196 | 1 | 334 | 0 | 36.9% | 99.5% | 170 | 0 | 6 / 19 |
+| jx bytecode-s6 | 531 | 196 | 1 | 334 | 0 | 36.9% | 99.5% | 170 | 0 | 6 / 19 |
 
 `cases` are the runnable cases (jq.test has 550 entries; the `%%FAIL` entries appear only in the last column: a pass there means the tool refused the program, so a stage that rejects everything it does not know trivially passes some of them). The matrix document's 371 of 550 for jaq is 359 + its 12 `%%FAIL` passes.
 
@@ -42,37 +43,37 @@ re-recorded only when their versions change: `python -I tools/jqcompat.py record
 
 A case carries several tags, so rows overlap; `core` carries every case. What the tags mean: `docs/jq-feature-matrix.md`.
 
-| tag | cases | jq 1.8.2 | jaq 3.1.2 | jx Stage 1 | jx Stage 2 | jx stage2-core |
-|---|---|---|---|---|---|---|
-| core | 531 | 531 | 359 | 9 | 196 | 196 |
-| construct | 267 | 267 | 186 | 0 | 109 | 109 |
-| arith | 195 | 195 | 123 | 0 | 89 | 89 |
-| comma-alt | 185 | 185 | 137 | 0 | 70 | 70 |
-| try-catch | 127 | 127 | 38 | 0 | 40 | 40 |
-| limit-first | 90 | 90 | 42 | 0 | 39 | 39 |
-| vars | 90 | 90 | 49 | 0 | 11 | 11 |
-| collectors | 80 | 80 | 55 | 0 | 0 | 0 |
-| keys-has | 58 | 58 | 40 | 0 | 19 | 19 |
-| string-fns | 55 | 55 | 22 | 0 | 4 | 4 |
-| assign | 42 | 42 | 25 | 0 | 0 | 0 |
-| conditional | 38 | 38 | 27 | 0 | 22 | 22 |
-| paths | 34 | 34 | 11 | 0 | 0 | 0 |
-| reduce-foreach | 32 | 32 | 17 | 0 | 2 | 2 |
-| destructure | 30 | 30 | 10 | 0 | 0 | 0 |
-| math | 28 | 28 | 15 | 0 | 0 | 0 |
-| dynamic-index | 25 | 25 | 5 | 0 | 6 | 6 |
-| number-literals | 20 | 20 | 7 | 0 | 7 | 7 |
-| funcdef | 17 | 17 | 15 | 0 | 0 | 0 |
-| dates | 14 | 14 | 7 | 0 | 0 | 0 |
-| modules | 13 | 13 | 5 | 0 | 1 | 1 |
-| interpolation | 10 | 10 | 8 | 0 | 0 | 0 |
-| formats | 7 | 7 | 7 | 0 | 0 | 0 |
-| label-break | 6 | 6 | 6 | 0 | 2 | 2 |
-| walk | 4 | 4 | 3 | 0 | 0 | 0 |
-| recurse-dotdot | 3 | 3 | 3 | 0 | 0 | 0 |
-| entries | 3 | 3 | 2 | 0 | 0 | 0 |
-| loc | 2 | 2 | 0 | 0 | 0 | 0 |
-| input-inputs | 2 | 2 | 1 | 0 | 0 | 0 |
+| tag | cases | jq 1.8.2 | jaq 3.1.2 | jx Stage 1 | jx Stage 2 | jx stage2-core | jx bytecode-s6 |
+|---|---|---|---|---|---|---|---|
+| core | 531 | 531 | 359 | 9 | 196 | 196 | 196 |
+| construct | 267 | 267 | 186 | 0 | 109 | 109 | 109 |
+| arith | 195 | 195 | 123 | 0 | 89 | 89 | 89 |
+| comma-alt | 185 | 185 | 137 | 0 | 70 | 70 | 70 |
+| try-catch | 127 | 127 | 38 | 0 | 40 | 40 | 40 |
+| limit-first | 90 | 90 | 42 | 0 | 39 | 39 | 39 |
+| vars | 90 | 90 | 49 | 0 | 11 | 11 | 11 |
+| collectors | 80 | 80 | 55 | 0 | 0 | 0 | 0 |
+| keys-has | 58 | 58 | 40 | 0 | 19 | 19 | 19 |
+| string-fns | 55 | 55 | 22 | 0 | 4 | 4 | 4 |
+| assign | 42 | 42 | 25 | 0 | 0 | 0 | 0 |
+| conditional | 38 | 38 | 27 | 0 | 22 | 22 | 22 |
+| paths | 34 | 34 | 11 | 0 | 0 | 0 | 0 |
+| reduce-foreach | 32 | 32 | 17 | 0 | 2 | 2 | 2 |
+| destructure | 30 | 30 | 10 | 0 | 0 | 0 | 0 |
+| math | 28 | 28 | 15 | 0 | 0 | 0 | 0 |
+| dynamic-index | 25 | 25 | 5 | 0 | 6 | 6 | 6 |
+| number-literals | 20 | 20 | 7 | 0 | 7 | 7 | 7 |
+| funcdef | 17 | 17 | 15 | 0 | 0 | 0 | 0 |
+| dates | 14 | 14 | 7 | 0 | 0 | 0 | 0 |
+| modules | 13 | 13 | 5 | 0 | 1 | 1 | 1 |
+| interpolation | 10 | 10 | 8 | 0 | 0 | 0 | 0 |
+| formats | 7 | 7 | 7 | 0 | 0 | 0 | 0 |
+| label-break | 6 | 6 | 6 | 0 | 2 | 2 | 2 |
+| walk | 4 | 4 | 3 | 0 | 0 | 0 | 0 |
+| recurse-dotdot | 3 | 3 | 3 | 0 | 0 | 0 | 0 |
+| entries | 3 | 3 | 2 | 0 | 0 | 0 | 0 |
+| loc | 2 | 2 | 0 | 0 | 0 | 0 | 0 |
+| input-inputs | 2 | 2 | 1 | 0 | 0 | 0 | 0 |
 
 ## 3. What changed since the previous stage
 
@@ -93,6 +94,12 @@ A case carries several tags, so rows overlap; `core` carries every case. What th
 - tags with fewer passing cases (regressions): none
 - cases newly passing: 0; no longer passing: 0
 
+**jx bytecode-s6**
+
+- tags with more passing cases: none
+- tags with fewer passing cases (regressions): none
+- cases newly passing: 0; no longer passing: 0
+
 ## 4. Runs
 
 | tool / stage | date | jx commit | tool version |
@@ -102,6 +109,7 @@ A case carries several tags, so rows overlap; `core` carries every case. What th
 | jx Stage 1 | 2026-11-12 | b28b3c7 | - |
 | jx Stage 2 | 2026-11-12 | 7765c44 | - |
 | jx stage2-core | 2026-11-12 | c43a621 | - |
+| jx bytecode-s6 | 2026-11-12 | 81a4206 | - |
 
 ## 5. Speed (median milliseconds, whole process on Windows, lower is better)
 
@@ -114,6 +122,7 @@ Each stage's run times jx, jq and jaq again on the same machine (`tools/timing.p
 | stage1 | 2026-11-12 | b28b3c7 | 10 / 91 / 51 | 16 / 95 / 55 | 19 / 116 / 81 | 19 / 122 / 105 | - | - | - | - | - | - | - |
 | stage2-core | 2026-11-12 | c43a621 | - | - | - | - | - | - | - | - | - | - | - |
 | stage2 | 2026-11-12 | 7765c44 | 27 / 61 / 50 | 31 / 63 / 51 | 33 / 82 / 80 | 35 / 91 / 102 | 42 / 112 / 133 | 32 / 79 / 64 | 33 / 79 / 71 | 38 / 95 / 82 | 31 / 62 / 52 | 32 / 62 / 53 | 37 / 93 / 98 |
+| bytecode-s6 | 2026-11-12 | 81a4206 | - | - | - | - | - | - | - | - | - | - | - |
 
 **16.34 MB**
 
@@ -122,6 +131,7 @@ Each stage's run times jx, jq and jaq again on the same machine (`tools/timing.p
 | stage1 | 2026-11-12 | b28b3c7 | 19 / 585 / 399 | 67 / 579 / 400 | 97 / 775 / 664 | 92 / 857 / 871 | - | - | - | - | - | - | - |
 | stage2-core | 2026-11-12 | c43a621 | 90 / 808 / 464 | 94 / 616 / 406 | 103 / 742 / 632 | 114 / 834 / 870 | 202 / 1053 / 1208 | 93 / 722 / 509 | 96 / 706 / 585 | 140 / 868 / 681 | 83 / 542 / 392 | 90 / 546 / 393 | 145 / 855 / 816 |
 | stage2 | 2026-11-12 | 7765c44 | 35 / 543 / 389 | 131 / 614 / 452 | 76 / 733 / 643 | 91 / 820 / 852 | 174 / 1037 / 1174 | 72 / 716 / 497 | 75 / 698 / 585 | 119 / 863 / 672 | 59 / 534 / 392 | 68 / 534 / 389 | 116 / 841 / 803 |
+| bytecode-s6 | 2026-11-12 | 81a4206 | 33 / 556 / 400 | 62 / 561 / 399 | 79 / 758 / 662 | 91 / 841 / 892 | 167 / 1062 / 1229 | 75 / 750 / 518 | 77 / 724 / 586 | 120 / 887 / 692 | 62 / 560 / 397 | 71 / 561 / 399 | 119 / 865 / 848 |
 
 ## 6. Peak memory (peak working set in MB, whole process, lower is better)
 
@@ -133,6 +143,7 @@ Same runs as section 5 (`tools/timing.py`); cells are `jx / jq / jaq`. jq is the
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | stage2-core | 2026-11-12 | - | - | - | - | - | - | - | - | - | - | - |
 | stage2 | 2026-11-12 | 27 / 39 / 43 | 27 / 39 / 43 | 27 / 39 / 43 | 27 / 39 / 43 | 28 / 39 / 43 | 27 / 40 / 44 | 27 / 39 / 43 | 27 / 40 / 44 | 27 / 39 / 43 | 28 / 39 / 43 | 27 / 39 / 43 |
+| bytecode-s6 | 2026-11-12 | - | - | - | - | - | - | - | - | - | - | - |
 
 **16.34 MB**
 
@@ -140,6 +151,7 @@ Same runs as section 5 (`tools/timing.py`); cells are `jx / jq / jaq`. jq is the
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | stage2-core | 2026-11-12 | 46 / 325 / 336 | 46 / 325 / 336 | 47 / 325 / 336 | 50 / 325 / 336 | 59 / 325 / 335 | 47 / 330 / 337 | 47 / 326 / 336 | 47 / 330 / 336 | 47 / 325 / 336 | 55 / 325 / 336 | 48 / 325 / 336 |
 | stage2 | 2026-11-12 | 42 / 325 / 336 | 42 / 325 / 336 | 43 / 325 / 336 | 46 / 325 / 336 | 55 / 325 / 335 | 42 / 330 / 337 | 42 / 327 / 336 | 42 / 330 / 336 | 42 / 325 / 336 | 50 / 325 / 336 | 43 / 325 / 336 |
+| bytecode-s6 | 2026-11-12 | 42 / 325 / 336 | 42 / 325 / 336 | 43 / 325 / 336 | 46 / 325 / 336 | 55 / 325 / 335 | 42 / 330 / 337 | 42 / 327 / 336 | 42 / 330 / 336 | 42 / 325 / 336 | 50 / 325 / 336 | 43 / 325 / 336 |
 
 ## 7. Milestones of Stage 2
 
