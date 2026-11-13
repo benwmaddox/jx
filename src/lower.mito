@@ -354,6 +354,28 @@ fn lx(e: i64, vin: i64, dst: i64) -> i64 {
     return put_in(vin, dst);
 }
 
+// an object constructor whose pairs can be written as they are evaluated: at least one pair, every key a distinct string literal
+fn stream_ok(e: i64) -> bool {
+    let first = jj.f.aa[e];
+    let n = jj.f.ab[e];
+    if n < 1 { return false; }
+    var i = 0;
+    while i < n {
+        let ke = jj.f.okey[first + i];
+        if jj.f.ak[ke] != K.LIT { return false; }
+        let kh = jj.f.aa[ke];
+        if jj.v.vt[kh] != 5 { return false; }
+        var j = 0;
+        while j < i {
+            let k2 = jj.f.aa[jj.f.okey[first + j]];
+            if jj.v.vb[k2] == jj.v.vb[kh] && substr(jj.f.lits, jj.v.va[k2], jj.v.vb[k2]) == substr(jj.f.lits, jj.v.va[kh], jj.v.vb[kh]) { return false; }
+            j += 1;
+        }
+        i += 1;
+    }
+    return true;
+}
+
 // the block of the single-output or generator node h (frame t)
 fn lower_block(h: i64, t: i64) {
     jj.c.curt = t;
@@ -364,8 +386,13 @@ fn lower_block(h: i64, t: i64) {
     let pos = jj.f.at[e];
     let nxt = jj.f.nx[e];
     if k == K.SELECT {
-        let c = lx(jj.f.aa[e], x, -1);
-        emit(Op.JF, c, 0, 0, 0, pos);
+        let ce = jj.f.aa[e];
+        if jj.f.ak[ce] == K.CMPLIT {
+            emit(Op.JNCL, jj.f.ac[ce], jj.f.aa[ce], 0, jj.f.ab[ce], pos);
+        } else {
+            let c = lx(ce, x, -1);
+            emit(Op.JF, c, 0, 0, 0, pos);
+        }
         goto_node(nxt, x, t, Op.JMP);
         return;
     }
@@ -376,8 +403,14 @@ fn lower_block(h: i64, t: i64) {
         return;
     }
     if k == K.IF {
-        let c = lx(jj.f.aa[e], x, -1);
-        let j1 = emit(Op.JF, c, 0, 0, 0, pos);
+        var j1 = 0;
+        let ce = jj.f.aa[e];
+        if jj.f.ak[ce] == K.CMPLIT {
+            j1 = emit(Op.JNCL, jj.f.ac[ce], jj.f.aa[ce], 0, jj.f.ab[ce], pos);
+        } else {
+            let c = lx(ce, x, -1);
+            j1 = emit(Op.JF, c, 0, 0, 0, pos);
+        }
         goto_node(jj.f.ab[e], x, t, Op.JMP);
         patch_here(j1);
         goto_node(jj.f.ac[e], x, t, Op.JMP);
@@ -558,6 +591,33 @@ fn lower_block(h: i64, t: i64) {
         patch_here(j1);
         emit(Op.RET, 0, 0, 0, 0, pos);
         return;
+    }
+    if nxt < 0 && jj.c.tk[t] == 1 {
+        // a result: a slot is printed from its span, an object with constant keys is written while it is evaluated
+        if k == K.NODE {
+            emit(Op.PRNN, 0, jj.f.aa[e], 0, 0, pos);
+            emit(Op.RET, 0, 0, 0, 0, pos);
+            return;
+        }
+        if k == K.OBJ && stream_ok(e) {
+            emit(Op.OUTB, 0, jj.f.ab[e], 0, 0, pos);
+            var i = 0;
+            let first = jj.f.aa[e];
+            while i < jj.f.ab[e] {
+                emit(Op.OUTK, 0, jj.f.aa[jj.f.okey[first + i]], i, 0, pos);
+                let ve = jj.f.oval[first + i];
+                if jj.f.ak[ve] == K.NODE {
+                    emit(Op.OUTN, 0, jj.f.aa[ve], 0, 0, pos);
+                } else {
+                    let vx = lx(ve, x, -1);
+                    emit(Op.OUTV, vx, 0, 0, 0, pos);
+                }
+                i += 1;
+            }
+            emit(Op.OUTE, 0, 0, 0, 0, pos);
+            emit(Op.RET, 0, 0, 0, 0, pos);
+            return;
+        }
     }
     // any other node has one output: compute it into the next node's register
     let w = succ_reg(nxt, t);

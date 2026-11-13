@@ -1,9 +1,0 @@
- {
-	"users" : [
-		{ "n" : "ann" ,
-		  "age" : 31 , "tags" : [ "a" , "b" ] ,
-		  "addr" : { "city" : "Austin" , "zip" : 78701 } } ,
-		{ "n":"bo","age":17,"tags":[ ],"addr":{ } }
-	] ,
-	"total" : 2 , "ok" : true , "note" : null
- }

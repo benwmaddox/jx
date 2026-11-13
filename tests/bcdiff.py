@@ -15,7 +15,7 @@ av = sys.argv[1:]
 for i, a in enumerate(av):
     if a.startswith("--") and i + 1 < len(av): opts[a] = av[i + 1]
 TREE, BC = args[0], args[1]
-T = os.environ.get("JX_TMP", "D:/tmp/w/jxbc2/t")
+T = os.environ.get("JX_TMP", "D:/tmp/w/jxbc2-t")
 WORKERS = int(opts.get("--workers", "10"))
 ONLY = opts.get("--only", "")
 os.makedirs(T + "/docs", exist_ok=True)

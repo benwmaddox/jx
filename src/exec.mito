@@ -147,6 +147,41 @@ fn exec(doc: text, filter: text, entry: i64) -> i64 {
         else if op == Op.OBJP {
             if bc_objp(doc, jj.m.rv[a], jj.m.rv[b], jj.m.rv[c]) != 0 { bad = true; } else { pc += 1; }
         }
+        else if op == Op.PRNN {
+            if jj.o.sep { jj.o.text += "
+"; }
+            jj.o.sep = true;
+            jj.o.results += 1;
+            if write_slot(doc, b, 0) != 0 { bad = true; } else { pc += 1; }
+        }
+        else if op == Op.OUTK {
+            if c != 0 { ow(","); }
+            if jj.o.pretty { newline_indent(1); }
+            write_string_h(doc, filter, b, false);
+            ow(":");
+            if jj.o.pretty { ow(" "); }
+            pc += 1;
+        }
+        else if op == Op.OUTV { write_h(doc, filter, jj.m.rv[a], 1); pc += 1; }
+        else if op == Op.OUTN { if write_slot(doc, b, 1) != 0 { bad = true; } else { pc += 1; } }
+        else if op == Op.OUTB {
+            if jj.o.sep { jj.o.text += "
+"; }
+            jj.o.sep = true;
+            jj.o.results += 1;
+            ow("{");
+            pc += 1;
+        }
+        else if op == Op.OUTE {
+            if jj.o.pretty { newline_indent(0); }
+            ow("}");
+            pc += 1;
+        }
+        else if op == Op.JNCL {
+            let h = cmplit(doc, filter, b, d, a);
+            if h < 0 { bad = true; }
+            else if jj.v.vt[h] >= 3 { pc += 1; } else { pc = c; }
+        }
         else if op == Op.INC { jj.m.rv[a] += 1; pc += 1; }
         else if op == Op.JZ { if jj.m.rv[a] == 0 { pc = c; } else { pc += 1; } }
         else if op == Op.JNZ { if jj.m.rv[a] != 0 { pc = c; } else { pc += 1; } }

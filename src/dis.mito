@@ -57,6 +57,12 @@ fn opname(op: i64) -> text {
     if op == Op.APPR { return "APPR"; }
     if op == Op.FOLDA { return "FOLDA"; }
     if op == Op.FOLDC { return "FOLDC"; }
+    if op == Op.PRNN { return "PRNN"; }
+    if op == Op.OUTB { return "OUTB"; }
+    if op == Op.OUTK { return "OUTK"; }
+    if op == Op.OUTV { return "OUTV"; }
+    if op == Op.OUTN { return "OUTN"; }
+    if op == Op.OUTE { return "OUTE"; }
     return "?";
 }
 

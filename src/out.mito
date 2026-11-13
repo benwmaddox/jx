@@ -369,3 +369,29 @@ fn write_h(doc: text, filter: text, h: i64, depth: i64) {
     if jj.o.pretty { newline_indent(depth); }
     if t == 7 { ow("}"); } else { ow("]"); }
 }
+
+// the slot of node n as a result or inside one (what write_h prints for node_val(n), without the entry); -1 on a navigation error
+fn write_slot(doc: text, n: i64, depth: i64) -> i64 {
+    if jj.sc.anyerr { if nav_check(n) != 0 { return -1; } }
+    if jj.sc.sgen[n] != gen_of(n) { ow("null"); return 0; }
+    let tag = jj.sc.stag[n];
+    if tag == 1 { ow("null"); return 0; }
+    if tag == 2 { ow("false"); return 0; }
+    if tag == 3 { ow("true"); return 0; }
+    let a = jj.sc.sa[n];
+    let b = jj.sc.sb[n];
+    if tag == 4 {
+        if jj.sc.sisint[n] != 0 { ow(str(jj.sc.sint[n])); } else { write_number(doc, a, b, 0); }
+        return 0;
+    }
+    if tag == 5 {
+        if depth == 0 && jj.o.raw {
+            if jj.sc.sesc[n] != 0 { decode_to(doc, a, b, 1); } else { ow(substr(doc, a + 1, b - a - 2)); }
+        } else {
+            if jj.sc.sesc[n] != 0 { write_string_norm(doc, a, b); } else { ow(substr(doc, a, b - a)); }
+        }
+        return 0;
+    }
+    write_container(doc, a, b, depth);
+    return 0;
+}

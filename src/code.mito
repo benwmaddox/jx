@@ -67,6 +67,13 @@ const Op {
     APPR: i64 = 97;     // append r[ib] to collector ia (id 0: the collector's depth, 1: the current depth)
     FOLDA: i64 = 98;    // add r[ib] to the add fold ia
     FOLDC: i64 = 99;    // count fold ia
+    // 7 writing without the arena (design 4.7): a slot is printed from its span, an object is written while it is evaluated
+    PRNN: i64 = 100;    // print the slot of node ib as a result
+    OUTB: i64 = 101;    // start a streamed object result with ib pairs
+    OUTK: i64 = 102;    // a streamed object's key (entry ib), first pair when ic = 0
+    OUTV: i64 = 103;    // a streamed object's value r[ia]
+    OUTN: i64 = 104;    // a streamed object's value: the slot of node ib
+    OUTE: i64 = 105;    // end of the streamed object
 }
 
 const Fr {
