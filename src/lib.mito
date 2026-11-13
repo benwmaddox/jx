@@ -483,7 +483,7 @@ fn math_fn1(doc: text, filter: text, id: i64, v: i64) -> i64 {
     if id == 71 { let z = 0.0; return mk_dbl(1.0 / z); }
     if id == 72 { let z = 0.0; return mk_dbl(z / z); }
     if id == 33 {
-        if jj.v.vt[v] == 5 { return v; }
+        if jj.v.vt[v] >= 5 { return v; }
         if jj.v.vt[v] != 4 { return jqerr(typed(doc, filter, v) + " cannot be negated"); }
         let y = numd(doc, filter, v);
         if !(y < 0.0) { return v; }

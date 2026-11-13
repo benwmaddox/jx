@@ -2295,7 +2295,7 @@ fn prelude_text() -> text {
         + "def trimstr($x): ltrimstr($x) | rtrimstr($x);" 
         + "def finites: select(isinfinite or isnan | not);" 
         + "def normals: select(isnormal);" 
-        + "def transpose: if . == [] then [] else . as $in | (map(length) | max) as $max | [range(0; $max) as $j | [range(0; $in | length) as $i | $in[$i][$j]]] end;" 
+        + "def transpose: (map(length) | max // 0) as $l | [range(0; $l) as $j | map(.[$j])];" 
         + "def IN(s): isempty(first(s == . | select(.))) | not;" 
         + "def IN(src; s): isempty(first(src == s | select(.))) | not;";
 }

@@ -173,3 +173,7 @@ select(.users[0].n == "a")
 .users[] | .tags[] | length
 .users[0].tags | .[1]
 .[] | select(. > 1) | length
+[.[]?] | abs
+.users | abs
+.[]? | transpose
+[.users[]?] | transpose

@@ -125,8 +125,47 @@ def gen_expr(r, depth):
     return "%s | length" % gen_path(r)
 
 
+S3_MATH = ["floor", "ceil", "round", "sqrt", "fabs", "trunc", "abs", "exp2", "log2", "cbrt"]
+S3_STR = ["ascii_downcase", "ascii_upcase", "tojson", "utf8bytelength", "trim", "ltrim", "rtrim", 'ltrimstr("a")', 'rtrimstr("b")', 'startswith("a")',
+          'endswith("b")', 'split(",")', 'split("a")', 'trimstr("a")', "tostring", "length"]
+S3_COLL = ["sort", "unique", "reverse", "min", "max", "add", "flatten", "any", "all", "to_entries", "keys_unsorted", "transpose", "join(\",\")", "join(1)",
+           "group_by(.)", "sort_by(.a)", "group_by(.a)", "unique_by(.a)", "min_by(.a)", "max_by(.a)", 'contains(["a"])', 'inside([1,"a"])', 'IN(1,"a")',
+           "flatten(1)", "map_values(.)", "from_entries", "with_entries(.)", "first", "last", "length"]
+S3_PAT = ["$x", "[$x, $y]", "{a: $x}", "{$a}", "[$x]", "{a: $x, b: $y}", "[$x, [$y]]", "{a: [$x]}"]
+
+
+def gen_s3(r, depth):
+    """Stage 3 grammar: reduce/foreach/def/patterns/collectors/math/strings"""
+    k = r.random()
+    p, q = gen_path(r), gen_path(r)
+    if depth <= 0 or k < 0.1:
+        return r.choice([p, "[.[]?]", "[" + p + "]", gen_lit(r)])
+    if k < 0.22:
+        return "reduce %s as $x (%s; %s)" % (p, r.choice(["0", "null", "[]", "{}", '""']), r.choice([". + $x", "[., $x]", ". + 1", "$x", ". // $x", ". + [$x]", "if $x then . else $x end"]))
+    if k < 0.32:
+        ex = r.choice(["foreach %s as $x (0; . + 1; .)", "foreach %s as $x (null; $x; .)", "foreach %s as $x (0; . + 1; [., $x])", "foreach %s as $x ([]; . + [$x]; length)", "foreach %s as $x (0; . + 1)"])
+        return ex % p
+    if k < 0.42:
+        return "%s as %s | %s" % (r.choice([p, "[" + p + "]", "{a:1,b:[2]}", "[1,[2]]"]), r.choice(S3_PAT), r.choice(["[$x, $y]", "$x", "[.]", "{$x}", "[$a]", "[$x, $a, $b]"]))
+    if k < 0.52:
+        return r.choice(["def f: %s; f", "def f(g): g | length; f(%s)", "def f($a): [$a, .]; f(%s)", "def f(g): [g]; f(%s)", "def f: def g: %s; g; f"]) % r.choice([p, q, "length"])
+    if k < 0.66:
+        return "%s | %s" % (r.choice([p, q, "[.[]?]", ".[]?"]), r.choice(S3_COLL))
+    if k < 0.74:
+        return "%s | %s" % (r.choice([p, q, "[.[]?]"]), r.choice(S3_MATH + ["pow(.; 2)", "log10", "sin", "tostring | tonumber?", "infinite", "isnan", "isinfinite", "isnormal", "nan | isnan"]))
+    if k < 0.86:
+        return "%s | %s" % (r.choice([p, q, "[.[]?]", ".[]?", gen_lit(r)]), r.choice(S3_STR))
+    if k < 0.92:
+        return "[%s | %s]" % (gen_s3(r, depth - 1), r.choice(["tojson", "type", "length", "tostring"]))
+    return "%s | %s" % (gen_s3(r, depth - 1), gen_s3(r, depth - 1))
+
+
+GRAMMAR = os.environ.get('JXFUZZ_GRAMMAR', 'base')
+
+
 def make_case(seed, i):
     r = random.Random(seed * 1000003 + i)
+    if GRAMMAR == 's3': return gen_doc(r), gen_s3(r, r.randint(1, 3))
     return gen_doc(r), gen_expr(r, r.randint(1, 3))
 
 
@@ -166,11 +205,14 @@ def main():
     ap.add_argument("--jq", default="C:/ProgramData/chocolatey/lib/jq/tools/jq.exe")
     ap.add_argument("--count", type=int, default=500)
     ap.add_argument("--seeds", default="1,2,3,4")
+    ap.add_argument("--grammar", choices=["base", "s3"], default="base", help="s3: the Stage 3 grammar (reduce/foreach/def/patterns/collectors/math/strings)")
     ap.add_argument("--only", type=int, default=None)
     ap.add_argument("--show", type=int, default=12)
     a = ap.parse_args()
+    global GRAMMAR
+    GRAMMAR = a.grammar
     seeds = [int(s) for s in a.seeds.split(",")]
-    tmp = tempfile.mkdtemp(prefix="jxfuzz_", dir="D:/tmp/w/jx")
+    tmp = tempfile.mkdtemp(prefix="jxfuzz_", dir=os.environ.get("JX_TMP", "D:/tmp/w/jx"))
     jobs = [(s, i, a.exe, a.jq, tmp) for s in seeds for i in (range(a.count) if a.only is None else [a.only])]
     counts = {"ok": 0, "FAIL": 0, "rejected": 0, "unsupported": 0}
     fails = []
