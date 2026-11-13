@@ -117,7 +117,13 @@ Details that matter:
 
 Results of the last run are in the section "Results" below and in [docs/progress.md](docs/progress.md).
 
-## Stage 3
+## Stage 3 (branch stage3, in progress)
+
+Built: `reduce` and `foreach` (2 and 3 arguments, with patterns), destructuring `. as [$a, {b: $c}]` and `{$a}` (no `?//`, no computed keys), `def` with closure and `$` parameters (inlined at every call by parsing the body again; recursion is rejected), collectors (`sort`, `sort_by`, `group_by`, `unique`, `unique_by`, `min`, `max`, `min_by`, `max_by`, `reverse`, `flatten`, `any`, `all`, `contains`, `inside`, `in`, `IN`, `to_entries`, `keys_unsorted`, `transpose`, `join`), math (`floor ceil round sqrt fabs abs trunc exp exp2 log log2 log10 sin cos tan asin acos atan sinh cosh tanh cbrt nearbyint pow atan2 fmod infinite nan isinfinite isnan isnormal`), strings (`ascii_downcase`, `ascii_upcase`, `ltrimstr`, `rtrimstr`, `trimstr`, `startswith`, `endswith`, `split/1`, `trim`, `ltrim`, `rtrim`, `utf8bytelength`, `tojson`).
+Computed indexes (`.[$k]`, `.[expr]`, negative literal indexes) stay rejected in filters: the owner postponed them; only the prelude (builtins written in jq, `prelude_text` in `src/compile.mito`) may use them. Collectors keep at most 524288 elements (a named error beyond). The parser nests at most 12 `parse_expr` levels (Mitochondria allows 64 nested calls): deeper filters, and deep expansions such as `from_entries`, `with_entries`, `map_values`, are rejected with "not supported". Values nested more than 40 levels deep are rejected when copied.
+Not yet built: `?//`, string interpolation, `@formats`, `label`/`break`, `indices`/`index`, `fromjson`, `implode`/`explode`, flags (`-n`, `-e`, `--arg`, ...), `$ENV`, `--explain`.
+
+## Stage 3 (planned)
 
 `--explain` (print the automaton and slot program for a filter), with tests/explain.txt regression pairs.
 
