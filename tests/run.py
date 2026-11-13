@@ -157,7 +157,7 @@ for args, want in (([".users[0].n", "-c"], b'"ann"\n'), (["-c", "--raw-output", 
 # exit codes as jq's: 3 syntax error in the filter, 5 an error while the filter runs or invalid input, 1 not supported
 exit_ok = 0
 exit_cases = [([".a |"], b'{"a":1}', 3), (["{a:"], b'{"a":1}', 3), ([".a.b"], b'{"a":1}', 5), (["error"], b'{"a":1}', 5), ([".a"], b'{"a":', 5), ([".a"], b'{"a":1} garbage', 5),
-              ([".[]"], b'1', 5), (["reduce range(3) as $x (0; .)"], b'1', 1), ([".a", "-Z"], b'1', 2), ([".a"], b'{"a":1}', 0), (["--validate", ".a"], b'{"a":1} x', 5)]
+              ([".[]"], b'1', 5), (["walk(.)"], b'1', 1), ([".a", "-Z"], b'1', 2), ([".a"], b'{"a":1}', 0), (["--validate", ".a"], b'{"a":1} x', 5)]
 for args, doc, want in exit_cases:
     p = subprocess.run([JX, "-c"] + args, input=doc, capture_output=True)
     if p.returncode == want and (want == 0 or (not p.stdout and p.stderr)): exit_ok += 1
