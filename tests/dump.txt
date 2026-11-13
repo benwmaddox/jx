@@ -1,0 +1,452 @@
+### .
+filter .
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  MOV      0, 4, 0, 0   ; col 0
+  0002  PRINT    0, 0, 0, 0   ; col 0
+  0003  RET      0, 0, 0, 0   ; col 0
+### .a
+filter .a
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  PRNN     0, 1, 0, 0   ; col 0
+  0002  RET      0, 0, 0, 0   ; col 0
+### .a.b.c
+filter .a.b.c
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  PRNN     0, 3, 0, 0   ; col 4
+  0002  RET      0, 0, 0, 0   ; col 4
+### .users[0].n
+filter .users[0].n
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  PRNN     0, 3, 0, 0   ; col 9
+  0002  RET      0, 0, 0, 0   ; col 9
+### .users[]
+filter .users[]
+scope 0  term 1  entry 0003  input r0
+root  entry 0001  input r8
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  PLAYC    0, 0, 0, 0   ; col 7
+  0002  RET      0, 0, 0, 0   ; col 7
+  0003  PRINT    0, 0, 0, 0   ; col 0
+  0004  RET      0, 0, 0, 0   ; col 0
+### .users[] | .addr.city
+filter .users[] | .addr.city
+scope 0  term 1  entry 0003  input r4
+root  entry 0001  input r9
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  PLAYC    0, 0, 0, 0   ; col 9
+  0002  RET      0, 0, 0, 0   ; col 9
+  0003  PRNN     0, 4, 0, 0   ; col 16
+  0004  RET      0, 0, 0, 0   ; col 16
+### .[2:5]
+filter .[2:5]
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  LDI      5, 11, 0, 0   ; col 2
+  0002  LDI      6, 12, 0, 0   ; col 4
+  0003  SLICE    0, 4, 5, 6   ; col 5
+  0004  PRINT    0, 0, 0, 0   ; col 0
+  0005  RET      0, 0, 0, 0   ; col 0
+### .users[1:] | length
+filter .users[1:] | length
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  LOADN    6, 1, 0, 0   ; col 0
+  0002  LDI      7, 11, 0, 0   ; col 7
+  0003  LDI      8, 1, 0, 0   ; col 9
+  0004  SLICE    5, 6, 7, 8   ; col 9
+  0005  FN       0, 5, 0, 1   ; col 13
+  0006  PRINT    0, 0, 0, 0   ; col 0
+  0007  RET      0, 0, 0, 0   ; col 0
+### .users[] | select(.age >= 85) | .n
+filter .users[] | select(.age >= 85) | .n
+scope 0  term 1  entry 0003  input r4
+root  entry 0001  input r9
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  PLAYC    0, 0, 0, 0   ; col 9
+  0002  RET      0, 0, 0, 0   ; col 9
+  0003  JNCL     16, 3, 0, 11   ; col 11
+  0004  MOV      10, 4, 0, 0   ; col 0
+  0005  PRNN     0, 4, 0, 0   ; col 32
+  0006  RET      0, 0, 0, 0   ; col 32
+### .a == 1
+filter .a == 1
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  CMPLIT   0, 1, 11, 11   ; col 3
+  0002  PRINT    0, 0, 0, 0   ; col 0
+  0003  RET      0, 0, 0, 0   ; col 0
+### .a < .b
+filter .a < .b
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  LOADN    5, 1, 0, 0   ; col 0
+  0002  LOADN    6, 2, 0, 0   ; col 5
+  0003  CMP      0, 5, 6, 13   ; col 3
+  0004  PRINT    0, 0, 0, 0   ; col 0
+  0005  RET      0, 0, 0, 0   ; col 0
+### .age + 1
+filter .age + 1
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  LOADN    5, 1, 0, 0   ; col 0
+  0002  LDI      6, 11, 0, 0   ; col 7
+  0003  ARITH    0, 5, 6, 21   ; col 5
+  0004  PRINT    0, 0, 0, 0   ; col 0
+  0005  RET      0, 0, 0, 0   ; col 0
+### .a * 2 - .b
+filter .a * 2 - .b
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  LOADN    5, 1, 0, 0   ; col 0
+  0002  LDI      6, 11, 0, 0   ; col 5
+  0003  ARITH    7, 5, 6, 23   ; col 3
+  0004  LOADN    8, 2, 0, 0   ; col 9
+  0005  ARITH    0, 7, 8, 22   ; col 7
+  0006  PRINT    0, 0, 0, 0   ; col 0
+  0007  RET      0, 0, 0, 0   ; col 0
+### -.a
+filter -.a
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  LOADN    5, 1, 0, 0   ; col 1
+  0002  NEG      0, 5, 0, 0   ; col 0
+  0003  PRINT    0, 0, 0, 0   ; col 0
+  0004  RET      0, 0, 0, 0   ; col 0
+### {n: .n, c: .addr.city}
+filter {n: .n, c: .addr.city}
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  OUTB     0, 2, 0, 0   ; col 0
+  0002  OUTK     0, 11, 0, 0   ; col 0
+  0003  OUTN     0, 1, 0, 0   ; col 0
+  0004  OUTK     0, 12, 1, 0   ; col 0
+  0005  OUTN     0, 3, 0, 0   ; col 0
+  0006  OUTE     0, 0, 0, 0   ; col 0
+  0007  RET      0, 0, 0, 0   ; col 0
+### [.users[] | .n]
+filter [.users[] | .n]
+scope 0  term 2  entry 0004  input r4
+root  entry 0001  input r9
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  ARRS     5, 0, 0, 0   ; col 0
+  0002  PRINT    5, 0, 0, 0   ; col 0
+  0003  RET      0, 0, 0, 0   ; col 0
+  0004  LOADN    0, 3, 0, 0   ; col 12
+  0005  APPR     0, 0, 0, 0   ; col 0
+  0006  RET      0, 0, 0, 0   ; col 0
+### {a: 1, b: [.x, .y]}
+filter {a: 1, b: [.x, .y]}
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  OUTB     0, 2, 0, 0   ; col 0
+  0002  OUTK     0, 11, 0, 0   ; col 0
+  0003  LDI      5, 12, 0, 0   ; col 4
+  0004  OUTV     5, 0, 0, 0   ; col 0
+  0005  OUTK     0, 13, 1, 0   ; col 0
+  0006  REGCLR   0, 0, 0, 0   ; col 10
+  0007  MOV      11, 4, 0, 0   ; col 0
+  0008  GOSUB    0, 0, 13, 0   ; col 13
+  0009  REGLIST  6, 0, 0, 0   ; col 10
+  0010  OUTV     6, 0, 0, 0   ; col 0
+  0011  OUTE     0, 0, 0, 0   ; col 0
+  0012  RET      0, 0, 0, 0   ; col 0
+  0013  MOV      12, 11, 0, 0   ; col 0
+  0014  GOSUB    0, 0, 19, 0   ; col 11
+  0015  MOV      13, 11, 0, 0   ; col 0
+  0016  LOADN    7, 2, 0, 0   ; col 15
+  0017  APPR     0, 7, 0, 1   ; col 10
+  0018  RET      0, 0, 0, 0   ; col 10
+  0019  LOADN    7, 1, 0, 0   ; col 11
+  0020  JMP      0, 0, 17, 0   ; col 0
+### .a, .b
+filter .a, .b
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  MOV      5, 4, 0, 0   ; col 0
+  0002  GOSUB    0, 0, 6, 0   ; col 0
+  0003  MOV      6, 4, 0, 0   ; col 0
+  0004  PRNN     0, 2, 0, 0   ; col 4
+  0005  RET      0, 0, 0, 0   ; col 4
+  0006  PRNN     0, 1, 0, 0   ; col 0
+  0007  RET      0, 0, 0, 0   ; col 0
+### .a // 0
+filter .a // 0
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  LOADN    5, 1, 0, 0   ; col 0
+  0002  JF       5, 0, 5, 0   ; col 3
+  0003  MOV      0, 5, 0, 0   ; col 0
+  0004  JMP      0, 0, 7, 0   ; col 0
+  0005  MOV      6, 4, 0, 0   ; col 0
+  0006  LDI      0, 11, 0, 0   ; col 6
+  0007  PRINT    0, 0, 0, 0   ; col 0
+  0008  RET      0, 0, 0, 0   ; col 0
+### if .a then 1 elif .b then 2 else 3 end
+filter if .a then 1 elif .b then 2 else 3 end
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  LOADN    5, 1, 0, 0   ; col 3
+  0002  JF       5, 0, 5, 0   ; col 0
+  0003  MOV      6, 4, 0, 0   ; col 0
+  0004  JMP      0, 0, 16, 0   ; col 11
+  0005  MOV      7, 4, 0, 0   ; col 0
+  0006  LOADN    8, 2, 0, 0   ; col 18
+  0007  JF       8, 0, 10, 0   ; col 13
+  0008  MOV      9, 7, 0, 0   ; col 0
+  0009  JMP      0, 0, 14, 0   ; col 26
+  0010  MOV      10, 7, 0, 0   ; col 0
+  0011  LDI      0, 13, 0, 0   ; col 33
+  0012  PRINT    0, 0, 0, 0   ; col 0
+  0013  RET      0, 0, 0, 0   ; col 0
+  0014  LDI      0, 12, 0, 0   ; col 26
+  0015  JMP      0, 0, 12, 0   ; col 0
+  0016  LDI      0, 11, 0, 0   ; col 11
+  0017  JMP      0, 0, 12, 0   ; col 0
+### if .a > 1 then .b else empty end
+filter if .a > 1 then .b else empty end
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  JNCL     15, 1, 4, 11   ; col 0
+  0002  MOV      5, 4, 0, 0   ; col 0
+  0003  JMP      0, 0, 6, 0   ; col 15
+  0004  MOV      6, 4, 0, 0   ; col 0
+  0005  RET      0, 0, 0, 0   ; col 23
+  0006  PRNN     0, 2, 0, 0   ; col 15
+  0007  RET      0, 0, 0, 0   ; col 15
+### try .a catch 0
+filter try .a catch 0
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  TRYB     0, 3, 6, 0   ; col 0
+  0002  MOV      9, 4, 0, 0   ; col 0
+  0003  GOSUB    0, 0, 11, 0   ; col 4
+  0004  POPF     0, 0, 0, 0   ; col 0
+  0005  RET      0, 0, 0, 0   ; col 0
+  0006  LDERR    10, 0, 0, 0   ; col 0
+  0007  MOV      11, 10, 0, 0   ; col 0
+  0008  LDI      0, 11, 0, 0   ; col 13
+  0009  PRINT    0, 0, 0, 0   ; col 0
+  0010  RET      0, 0, 0, 0   ; col 0
+  0011  LOADN    5, 1, 0, 0   ; col 4
+  0012  GUARD    0, 3, 0, 0   ; col 0
+  0013  MOV      0, 5, 0, 0   ; col 0
+  0014  GOSUB    0, 0, 9, 0   ; col 0
+  0015  POPF     0, 0, 0, 0   ; col 0
+  0016  RET      0, 0, 0, 0   ; col 0
+### try error("x") catch .
+filter try error("x") catch .
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  TRYB     0, 3, 6, 0   ; col 0
+  0002  MOV      9, 4, 0, 0   ; col 0
+  0003  GOSUB    0, 0, 11, 0   ; col 4
+  0004  POPF     0, 0, 0, 0   ; col 0
+  0005  RET      0, 0, 0, 0   ; col 0
+  0006  LDERR    10, 0, 0, 0   ; col 0
+  0007  MOV      11, 10, 0, 0   ; col 0
+  0008  MOV      0, 11, 0, 0   ; col 0
+  0009  PRINT    0, 0, 0, 0   ; col 0
+  0010  RET      0, 0, 0, 0   ; col 0
+  0011  LDI      12, 11, 0, 0   ; col 10
+  0012  RAISE    12, 0, 0, 0   ; col 4
+  0013  MOV      5, 12, 0, 0   ; col 0
+  0014  GUARD    0, 3, 0, 0   ; col 0
+  0015  MOV      0, 5, 0, 0   ; col 0
+  0016  GOSUB    0, 0, 9, 0   ; col 0
+  0017  POPF     0, 0, 0, 0   ; col 0
+  0018  RET      0, 0, 0, 0   ; col 0
+### .a as $x | $x + 1
+filter .a as $x | $x + 1
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  LOADN    5, 1, 0, 0   ; col 0
+  0002  MOV      6, 5, 0, 0   ; col 3
+  0003  MOV      7, 4, 0, 0   ; col 0
+  0004  LDI      8, 11, 0, 0   ; col 16
+  0005  ARITH    0, 6, 8, 21   ; col 14
+  0006  PRINT    0, 0, 0, 0   ; col 0
+  0007  RET      0, 0, 0, 0   ; col 0
+### .users[] as $u | $u.age
+filter .users[] as $u | $u.age
+scope 0  term 2  entry 0014  input r0
+root  entry 0001  input r8
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  MOV      9, 8, 0, 0   ; col 9
+  0002  MOV      10, 8, 0, 0   ; col 0
+  0003  PLAYB    11, 0, 0, 0   ; col 7
+  0004  LISTN    11, 12, 7, 0   ; col 7
+  0005  GOSUB    0, 0, 9, 0   ; col 9
+  0006  JMP      0, 0, 4, 0   ; col 7
+  0007  PLAYE    0, 0, 0, 0   ; col 7
+  0008  RET      0, 0, 0, 0   ; col 7
+  0009  MOV      13, 12, 0, 0   ; col 9
+  0010  MOV      14, 9, 0, 0   ; col 0
+  0011  FIELD    4, 13, 6, 3   ; col 19
+  0012  PRINT    4, 0, 0, 0   ; col 0
+  0013  RET      0, 0, 0, 0   ; col 0
+  0014  APPR     0, 0, 0, 0   ; col 0
+  0015  RET      0, 0, 0, 0   ; col 0
+### limit(3; .users[])
+filter limit(3; .users[])
+scope 0  term 2  entry 0020  input r0
+root  entry 0001  input r8
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  LDI      9, 11, 0, 0   ; col 6
+  0002  LIMI     13, 9, 6, 4   ; col 0
+  0003  LDI      11, 0, 0, 0   ; col 0
+  0004  MOV      14, 8, 0, 0   ; col 0
+  0005  GOSUBC   0, 4, 7, 0   ; col 0
+  0006  RET      0, 0, 0, 0   ; col 0
+  0007  PLAYB    15, 0, 0, 0   ; col 16
+  0008  LISTN    15, 10, 11, 0   ; col 16
+  0009  GOSUB    0, 0, 13, 0   ; col 0
+  0010  JMP      0, 0, 8, 0   ; col 16
+  0011  PLAYE    0, 0, 0, 0   ; col 16
+  0012  RET      0, 0, 0, 0   ; col 16
+  0013  INC      11, 0, 0, 0   ; col 0
+  0014  MOV      4, 10, 0, 0   ; col 0
+  0015  GOSUB    0, 0, 18, 0   ; col 0
+  0016  JLT      11, 13, 0, 0   ; col 0
+  0017  STOP     0, 4, 0, 0   ; col 0
+  0018  PRINT    4, 0, 0, 0   ; col 0
+  0019  RET      0, 0, 0, 0   ; col 0
+  0020  APPR     0, 0, 0, 0   ; col 0
+  0021  RET      0, 0, 0, 0   ; col 0
+### first(.users[])
+filter first(.users[])
+scope 0  term 2  entry 0020  input r0
+root  entry 0001  input r8
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  LDI      9, 11, 0, 0   ; col 0
+  0002  LIMI     13, 9, 6, 4   ; col 0
+  0003  LDI      11, 0, 0, 0   ; col 0
+  0004  MOV      14, 8, 0, 0   ; col 0
+  0005  GOSUBC   0, 4, 7, 0   ; col 0
+  0006  RET      0, 0, 0, 0   ; col 0
+  0007  PLAYB    15, 0, 0, 0   ; col 13
+  0008  LISTN    15, 10, 11, 0   ; col 13
+  0009  GOSUB    0, 0, 13, 0   ; col 0
+  0010  JMP      0, 0, 8, 0   ; col 13
+  0011  PLAYE    0, 0, 0, 0   ; col 13
+  0012  RET      0, 0, 0, 0   ; col 13
+  0013  INC      11, 0, 0, 0   ; col 0
+  0014  MOV      4, 10, 0, 0   ; col 0
+  0015  GOSUB    0, 0, 18, 0   ; col 0
+  0016  JLT      11, 13, 0, 0   ; col 0
+  0017  STOP     0, 4, 0, 0   ; col 0
+  0018  PRINT    4, 0, 0, 0   ; col 0
+  0019  RET      0, 0, 0, 0   ; col 0
+  0020  APPR     0, 0, 0, 0   ; col 0
+  0021  RET      0, 0, 0, 0   ; col 0
+### until(. > 100; . * 2)
+filter until(. > 100; . * 2)
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  MOV      5, 4, 0, 0   ; col 0
+  0002  LDI      6, 0, 0, 0   ; col 0
+  0003  LDI      7, 11, 0, 0   ; col 10
+  0004  CMP      8, 5, 7, 15   ; col 8
+  0005  JT       8, 0, 10, 0   ; col 0
+  0006  LDI      9, 12, 0, 0   ; col 19
+  0007  ARITH    5, 5, 9, 23   ; col 17
+  0008  UNTILCHK 6, 0, 0, 0   ; col 0
+  0009  JMP      0, 0, 3, 0   ; col 0
+  0010  MOV      0, 5, 0, 0   ; col 0
+  0011  PRINT    0, 0, 0, 0   ; col 0
+  0012  RET      0, 0, 0, 0   ; col 0
+### [range(0; 10)] | length
+filter [range(0; 10)] | length
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  REGCLR   0, 0, 0, 0   ; col 0
+  0002  MOV      9, 4, 0, 0   ; col 0
+  0003  GOSUB    0, 0, 7, 0   ; col 1
+  0004  FOLDR    0, 0, 2, 0   ; col 0
+  0005  PRINT    0, 0, 0, 0   ; col 0
+  0006  RET      0, 0, 0, 0   ; col 0
+  0007  LDI      10, 11, 0, 0   ; col 7
+  0008  LDI      11, 12, 0, 0   ; col 10
+  0009  LDI      12, 13, 0, 0   ; col 0
+  0010  RNGI     13, 10, 11, 12   ; col 1
+  0011  RNGN     13, 5, 14, 0   ; col 1
+  0012  GOSUB    0, 0, 15, 0   ; col 0
+  0013  JMP      0, 0, 11, 0   ; col 1
+  0014  RET      0, 0, 0, 0   ; col 1
+  0015  FOLDC    0, 0, 0, 0   ; col 0
+  0016  RET      0, 0, 0, 0   ; col 0
+### .users | map(.age) | add
+filter .users | map(.age) | add
+scope 0  term 3  entry 0005  input r4
+root  entry 0001  input r9
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  LOADN    10, 1, 0, 0   ; col 0
+  0002  FOLDS    5, 0, 1, 0   ; col 9
+  0003  PRINT    5, 0, 0, 0   ; col 0
+  0004  RET      0, 0, 0, 0   ; col 0
+  0005  LOADN    0, 3, 0, 0   ; col 13
+  0006  FOLDA    0, 0, 0, 0   ; col 0
+  0007  RET      0, 0, 0, 0   ; col 0
+### .users | length
+filter .users | length
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  LOADN    5, 1, 0, 0   ; col 0
+  0002  FN       0, 5, 0, 1   ; col 9
+  0003  PRINT    0, 0, 0, 0   ; col 0
+  0004  RET      0, 0, 0, 0   ; col 0
+### [.users[] | select(.age >= 85) | .n] | length
+filter [.users[] | select(.age >= 85) | .n] | length
+scope 0  term 4  entry 0004  input r4
+root  entry 0001  input r9
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  FOLDS    5, 0, 2, 0   ; col 0
+  0002  PRINT    5, 0, 0, 0   ; col 0
+  0003  RET      0, 0, 0, 0   ; col 0
+  0004  JNCL     16, 3, 0, 11   ; col 12
+  0005  MOV      10, 4, 0, 0   ; col 0
+  0006  LOADN    0, 4, 0, 0   ; col 33
+  0007  FOLDC    0, 0, 0, 0   ; col 0
+  0008  RET      0, 0, 0, 0   ; col 0
+### .users | map(.n) | length
+filter .users | map(.n) | length
+scope 0  term 4  entry 0005  input r4
+root  entry 0001  input r9
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  LOADN    10, 1, 0, 0   ; col 0
+  0002  FOLDS    5, 0, 2, 0   ; col 9
+  0003  PRINT    5, 0, 0, 0   ; col 0
+  0004  RET      0, 0, 0, 0   ; col 0
+  0005  LOADN    0, 3, 0, 0   ; col 13
+  0006  FOLDC    0, 0, 0, 0   ; col 0
+  0007  RET      0, 0, 0, 0   ; col 0
+### .a | tostring | length
+filter .a | tostring | length
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  LOADN    5, 1, 0, 0   ; col 0
+  0002  FN       6, 5, 0, 7   ; col 5
+  0003  FN       0, 6, 0, 1   ; col 16
+  0004  PRINT    0, 0, 0, 0   ; col 0
+  0005  RET      0, 0, 0, 0   ; col 0
+### not
+filter not
+root  entry 0001  input r4
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  FN       0, 4, 0, 5   ; col 0
+  0002  PRINT    0, 0, 0, 0   ; col 0
+  0003  RET      0, 0, 0, 0   ; col 0
+### .users[] | .n | tostring
+filter .users[] | .n | tostring
+scope 0  term 1  entry 0003  input r4
+root  entry 0001  input r9
+  0000  RET      0, 0, 0, 0   ; col 0
+  0001  PLAYC    0, 0, 0, 0   ; col 9
+  0002  RET      0, 0, 0, 0   ; col 9
+  0003  LOADN    10, 3, 0, 0   ; col 11
+  0004  FN       0, 10, 0, 7   ; col 16
+  0005  PRINT    0, 0, 0, 0   ; col 0
+  0006  RET      0, 0, 0, 0   ; col 0
