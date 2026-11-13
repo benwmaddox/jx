@@ -14,6 +14,7 @@ const Lim {
     MAX_DEPTH: i64 = 10000;      // nesting depth of the input (jq's own limit)
     REG1: i64 = 1048576;         // value entries of an arena at nesting depth 1, 2, 3
     REG0: i64 = 16777216;        // value entries of the document level arena
+    ENGINE: i64 = 1;             // 0 the tree walker, 1 the bytecode engine (a build-time choice; docs/bytecode-design.md section 9)
 }
 
 // the filter, compiled
@@ -206,6 +207,8 @@ struct J {
     o: Out;
     v: Val;
     ev: Ev;
+    c: Code;
+    m: Mach;
     num: Num;
     d1: Dec;
     d2: Dec;
@@ -218,6 +221,7 @@ struct J {
     exitc: i64;                   // the exit code of the error being reported: 1 not supported or a limit, 2 usage, 3 syntax, 5 invalid input or a runtime error
     fs: i64;                      // the filter in the arguments
     fe: i64;
+    dump: bool;                   // --dump-program: print the bytecode and stop
     wv_used: i64;
     wv_bound: i64;
     noas: i64;                    // compile: 1 while the source of reduce is parsed (an `as` belongs to the reduce)
@@ -288,6 +292,7 @@ fn parse_opts(args: text) -> i64 {
                 else if arg_is(args, s, e, "--compact-output") { jj.o.pretty = false; }
                 else if arg_is(args, s, e, "--raw-output") { jj.o.raw = true; }
                 else if arg_is(args, s, e, "--validate") { jj.sc.validate = true; }
+                else if arg_is(args, s, e, "--dump-program") { jj.dump = true; }
                 else if known_long(args, s, e) { return usage_error(args, s, e, true); }
                 else {
                     // an `--name=value` form of a known option
@@ -349,12 +354,23 @@ fn go(filter: text, doc: text) -> i64 {
     num_init();
     ev_init();
     if compile(filter) != 0 { return 1; }
+    if Lim.ENGINE == 1 {
+        if lower_prog() != 0 { return 1; }
+        if jj.dump {
+            dump_program(filter);
+            return 0;
+        }
+    }
     return scan(doc, filter);
 }
 
 use "util.mito";
 use "num.mito";
 use "compile.mito";
+use "code.mito";
+use "lower.mito";
+use "exec.mito";
+use "dis.mito";
 use "scan.mito";
 use "prog.mito";
 use "eval.mito";

@@ -1,0 +1,285 @@
+// The interpreter: runs the bytecode of code.mito from an entry instruction with the input already in its register. It returns
+// 0, or 1 with the error set (as the walker's `run` did); frames of the explicit stack replace the host recursion.
+
+// the builtins of one argument: the value, or -1 with the error set
+fn bc_fn(doc: text, filter: text, id: i64, v: i64) -> i64 {
+    if id == F.LENGTH { return length_of(doc, filter, v); }
+    if id == F.TYPE { return jj.ev.htype[type_idx(jj.v.vt[v])]; }
+    if id == F.NOT { return mk_bool(!truthy(v)); }
+    if id == F.KEYS { return keys_of(doc, filter, v); }
+    if id == F.ADD { return add_list(doc, filter, v); }
+    if id == F.TOSTRING { return tostring_of(doc, filter, v); }
+    if id == F.TONUMBER { return tonumber_of(doc, filter, v); }
+    if id == F.TOJSON { return tojson_of(doc, filter, v); }
+    if id == F.TOBOOL {
+        let t = jj.v.vt[v];
+        if t == 2 || t == 3 { return v; }
+        if t == 5 {
+            let n = str_plain(doc, v, 0);
+            if n == 4 && substr(jj.tmp, 0, 4) == "true" { return jj.ev.htrue; }
+            if n == 5 && substr(jj.tmp, 0, 5) == "false" { return jj.ev.hfalse; }
+        }
+        return jqerr(typed(doc, filter, v) + " cannot be parsed as a boolean");
+    }
+    return math_of(doc, filter, id, v);
+}
+
+// limit(n; f), nth, skip for one value of the count: the limit in r[ia], or 1 when there is nothing to run (jj.ev.err set when 2)
+fn bc_limit(doc: text, filter: text, e: i64, nv: i64) -> i64 {
+    let mode = jj.f.ac[e];
+    if jj.v.vt[nv] != 4 { jqerr("Invalid limit: a number is required"); return -1; }
+    let lim = dtoi(numd(doc, filter, nv));
+    if mode == 1 && lim < 0 { jqerr("limit doesn't support negative count"); return -1; }
+    if mode == 5 && lim < 0 { jqerr("nth doesn't support negative indices"); return -1; }
+    if mode == 6 && lim < 0 { jqerr("skip doesn't support negative count"); return -1; }
+    return lim;
+}
+
+fn bc_objp(doc: text, r: i64, kx: i64, vx: i64) -> i64 {
+    // an existing key: the value is replaced in place
+    var p = jj.v.va[r];
+    while p >= 0 {
+        if str_cmp(doc, jj.v.va[p], kx) == 0 { jj.v.vb[p] = vx; return 0; }
+        p = jj.v.vn[p];
+    }
+    let pe = ent(0, 0, kx, vx);
+    if pe < 0 { return -1; }
+    if jj.v.vb[r] >= 0 { jj.v.vn[jj.v.vb[r]] = pe; } else { jj.v.va[r] = pe; }
+    jj.v.vb[r] = pe;
+    jj.v.vf[r] += 1;
+    return 0;
+}
+
+fn exec(doc: text, filter: text, entry: i64) -> i64 {
+    var pc = entry;
+    var sp = 0;
+    while true {
+        let op = jj.c.iop[pc];
+        let a = jj.c.ia[pc];
+        let b = jj.c.ib[pc];
+        let c = jj.c.ic[pc];
+        let d = jj.c.id[pc];
+        var bad = false;
+        if op == Op.MOV { jj.m.rv[a] = jj.m.rv[b]; pc += 1; }
+        else if op == Op.LOADN {
+            let h = node_val(b);
+            if h < 0 { bad = true; } else { jj.m.rv[a] = h; pc += 1; }
+        }
+        else if op == Op.JMP { pc = c; }
+        else if op == Op.JF {
+            if jj.v.vt[jj.m.rv[a]] >= 3 { pc += 1; } else { pc = c; }
+        }
+        else if op == Op.JT {
+            if jj.v.vt[jj.m.rv[a]] >= 3 { pc = c; } else { pc += 1; }
+        }
+        else if op == Op.RET {
+            if sp == 0 { return 0; }
+            sp -= 1;
+            pc = jj.m.cpc[sp];
+        }
+        else if op == Op.GOSUB || op == Op.GOSUBC || op == Op.TRYB || op == Op.GUARD {
+            if sp >= 2047 { fatal("expressions nested too deeply"); bad = true; }
+            else {
+                if op == Op.GOSUB { jj.m.ck[sp] = Fr.CALL; jj.m.cpc[sp] = pc + 1; jj.m.ce[sp] = 0; pc = c; }
+                else if op == Op.GOSUBC { jj.m.ck[sp] = Fr.CATCH; jj.m.cpc[sp] = pc + 1; jj.m.ce[sp] = b; pc = c; }
+                else if op == Op.TRYB { jj.m.ck[sp] = Fr.TRY; jj.m.cpc[sp] = c; jj.m.ce[sp] = b; pc += 1; }
+                else { jj.m.ck[sp] = Fr.GUARD; jj.m.cpc[sp] = 0; jj.m.ce[sp] = b; pc += 1; }
+                sp += 1;
+            }
+        }
+        else if op == Op.POPF { sp -= 1; pc += 1; }
+        else if op == Op.PRINT {
+            if jj.o.sep { jj.o.text += "\n"; }
+            jj.o.sep = true;
+            jj.o.results += 1;
+            write_h(doc, filter, jj.m.rv[a], 0);
+            pc += 1;
+        }
+        else if op == Op.LDI { jj.m.rv[a] = b; pc += 1; }
+        else if op == Op.CMPLIT {
+            let h = cmplit(doc, filter, b, c, d);
+            if h < 0 { bad = true; } else { jj.m.rv[a] = h; pc += 1; }
+        }
+        else if op == Op.ARITH {
+            let h = arith(doc, filter, d, jj.m.rv[b], jj.m.rv[c]);
+            if h < 0 { bad = true; } else { jj.m.rv[a] = h; pc += 1; }
+        }
+        else if op == Op.CMP {
+            let cc = cmp_vals(doc, filter, jj.m.rv[b], jj.m.rv[c]);
+            if cc == -2 { bad = true; } else { jj.m.rv[a] = mk_bool(cmp_result(d, cc)); pc += 1; }
+        }
+        else if op == Op.NEG {
+            let h = neg_val(doc, filter, jj.m.rv[b]);
+            if h < 0 { bad = true; } else { jj.m.rv[a] = h; pc += 1; }
+        }
+        else if op == Op.BOOLT { jj.m.rv[a] = mk_bool(jj.v.vt[jj.m.rv[b]] >= 3); pc += 1; }
+        else if op == Op.FIELD {
+            let h = nav_key(doc, jj.m.rv[b], c, d);
+            if h < 0 { bad = true; } else { jj.m.rv[a] = h; pc += 1; }
+        }
+        else if op == Op.IDX {
+            let h = nav_idx(doc, jj.m.rv[b], c);
+            if h < 0 { bad = true; } else { jj.m.rv[a] = h; pc += 1; }
+        }
+        else if op == Op.SLICE {
+            let h = slice_of(doc, filter, jj.m.rv[b], jj.m.rv[c], jj.m.rv[d]);
+            if h < 0 { bad = true; } else { jj.m.rv[a] = h; pc += 1; }
+        }
+        else if op == Op.FN {
+            let h = bc_fn(doc, filter, d, jj.m.rv[b]);
+            if h < 0 { bad = true; } else { jj.m.rv[a] = h; pc += 1; }
+        }
+        else if op == Op.HAS {
+            let h = has_of(doc, filter, jj.m.rv[b], jj.m.rv[c]);
+            if h < 0 { bad = true; } else { jj.m.rv[a] = h; pc += 1; }
+        }
+        else if op == Op.TYPEMASK {
+            jj.m.rv[a] = mk_bool(((d >> jj.v.vt[jj.m.rv[b]]) & 1) != 0);
+            pc += 1;
+        }
+        else if op == Op.OBJB {
+            let h = ent(7, 1, -1, -1);
+            if h < 0 { bad = true; } else { jj.m.rv[a] = h; pc += 1; }
+        }
+        else if op == Op.OBJCK {
+            if jj.v.vt[jj.m.rv[a]] != 5 { jqerr("Object keys must be strings"); bad = true; } else { pc += 1; }
+        }
+        else if op == Op.OBJP {
+            if bc_objp(doc, jj.m.rv[a], jj.m.rv[b], jj.m.rv[c]) != 0 { bad = true; } else { pc += 1; }
+        }
+        else if op == Op.INC { jj.m.rv[a] += 1; pc += 1; }
+        else if op == Op.JZ { if jj.m.rv[a] == 0 { pc = c; } else { pc += 1; } }
+        else if op == Op.JNZ { if jj.m.rv[a] != 0 { pc = c; } else { pc += 1; } }
+        else if op == Op.JLT { if jj.m.rv[a] < jj.m.rv[b] { pc = c; } else { pc += 1; } }
+        else if op == Op.LDERR { jj.m.rv[a] = jj.ev.errv; pc += 1; }
+        else if op == Op.STOP { jj.ev.stopto = b; bad = true; }
+        else if op == Op.FATAL {
+            if b == 0 { fatal("expressions nested too deeply"); } else { fatal("an expression of this kind where a single value is needed"); }
+            bad = true;
+        }
+        else if op == Op.RAISE { raise_value(doc, filter, jj.m.rv[a]); bad = true; }
+        else if op == Op.APPR {
+            var dp = jj.ev.depth;
+            if d == 0 { dp = jj.f.r_depth[a]; }
+            if append_reg(a, jj.m.rv[b], dp) != 0 { bad = true; } else { pc += 1; }
+        }
+        else if op == Op.FOLDA {
+            if fold_add(doc, filter, a, jj.m.rv[b]) != 0 { bad = true; } else { pc += 1; }
+        }
+        else if op == Op.FOLDC { reg_touch(a); jj.ev.rc[a] += 1; pc += 1; }
+        else if op == Op.ARRS || op == Op.FOLDS {
+            let r = jj.f.s_reg[b];
+            reg_touch(r);
+            if jj.ev.rerr[r] != 0 { raise_deferred(r); bad = true; }
+            else if scope_parent_check(doc, filter, b) != 0 { bad = true; }
+            else {
+                if op == Op.ARRS { jj.m.rv[a] = reg_list(r); } else { jj.m.rv[a] = fold_result(r, c); }
+                pc += 1;
+            }
+        }
+        else if op == Op.REGCLR { reg_clear(a); pc += 1; }
+        else if op == Op.REGLIST { jj.m.rv[a] = reg_list(b); pc += 1; }
+        else if op == Op.FOLDR { jj.m.rv[a] = fold_result(b, c); pc += 1; }
+        else if op == Op.ISEMP { jj.m.rv[a] = mk_bool(jj.m.rv[b] == 0); pc += 1; }
+        else if op == Op.PLAYB {
+            if scope_parent_check(doc, filter, b) != 0 { bad = true; }
+            else {
+                let r = jj.f.s_reg[b];
+                reg_touch(r);
+                jj.m.rv[a] = jj.ev.rh[r];
+                pc += 1;
+            }
+        }
+        else if op == Op.PLAYC { if scope_parent_check(doc, filter, a) != 0 { bad = true; } else { pc += 1; } }
+        else if op == Op.LISTN {
+            let p = jj.m.rv[a];
+            if p < 0 { pc = c; } else { jj.m.rv[b] = p; jj.m.rv[a] = jj.v.vn[p]; pc += 1; }
+        }
+        else if op == Op.PLAYE {
+            let r = jj.f.s_reg[a];
+            if jj.ev.rerr[r] != 0 { raise_deferred(r); bad = true; } else { pc += 1; }
+        }
+        else if op == Op.REGFIRST { jj.m.rv[a] = jj.ev.rh[b]; pc += 1; }
+        else if op == Op.ITRB {
+            let s = jj.m.rv[b];
+            let t = jj.v.vt[s];
+            if t != 6 && t != 7 { jqerr("Cannot iterate over " + typed(doc, filter, s)); bad = true; }
+            else {
+                var s2 = s;
+                if jj.v.vs[s] == 0 { s2 = built_of(doc, s); }
+                if s2 < 0 { bad = true; }
+                else { jj.m.rv[a] = jj.v.va[s2]; jj.m.rv[a + 1] = t; pc += 1; }
+            }
+        }
+        else if op == Op.ITRN {
+            let p = jj.m.rv[a];
+            if p < 0 { pc = c; }
+            else {
+                var w = p;
+                if jj.m.rv[a + 1] == 7 { w = jj.v.vb[p]; }
+                jj.m.rv[a] = jj.v.vn[p];
+                jj.m.rv[b] = w;
+                pc += 1;
+            }
+        }
+        else if op == Op.RNGI {
+            let x = jj.m.rv[b];
+            let y = jj.m.rv[c];
+            let s = jj.m.rv[d];
+            if jj.v.vt[x] != 4 || jj.v.vt[y] != 4 || jj.v.vt[s] != 4 { jqerr("Range bounds must be numeric"); bad = true; }
+            else {
+                jj.m.rf[a] = numd(doc, filter, x);
+                jj.m.rf[a + 1] = numd(doc, filter, y);
+                jj.m.rf[a + 2] = numd(doc, filter, s);
+                jj.m.rv[a + 3] = 0;
+                pc += 1;
+            }
+        }
+        else if op == Op.RNGN {
+            let x = jj.m.rf[a];
+            let lim = jj.m.rf[a + 1];
+            let step = jj.m.rf[a + 2];
+            if jj.m.rv[a + 3] > 100000000 { fatal("`range` produced more than 100000000 values"); bad = true; }
+            else if (step > 0.0 && x < lim) || (step < 0.0 && x > lim) {
+                var w = -1;
+                if x == floor(x) && x > -1000000000000.0 && x < 1000000000000.0 { w = ent(4, 4, x as i64, 0); } else { w = mk_dbl(x); }
+                if w < 0 { bad = true; }
+                else {
+                    jj.m.rv[b] = w;
+                    jj.m.rf[a] = x + step;
+                    jj.m.rv[a + 3] += 1;
+                    pc += 1;
+                }
+            } else { pc = c; }
+        }
+        else if op == Op.LIMI {
+            let lim = bc_limit(doc, filter, d, jj.m.rv[b]);
+            if lim < 0 { bad = true; }
+            else if jj.f.ac[d] == 1 && lim == 0 { pc = c; }
+            else { jj.m.rv[a] = lim; pc += 1; }
+        }
+        else if op == Op.UNTILCHK {
+            jj.m.rv[a] += 1;
+            if jj.m.rv[a] > 100000000 { fatal("`until` ran more than 100000000 rounds"); bad = true; } else { pc += 1; }
+        }
+        else { jj.err = "jx: internal error: unknown instruction"; jj.exitc = 1; jj.ev.err = 2; bad = true; }
+        if bad {
+            // unwind: the frames above the nearest handler go; a try catches an error of its own body, a limit its own stop
+            var resumed = false;
+            while sp > 0 && !resumed {
+                sp -= 1;
+                let kf = jj.m.ck[sp];
+                if kf == Fr.TRY {
+                    let e = jj.m.ce[sp];
+                    if jj.ev.errfrom == e { jj.ev.errfrom = -1; }
+                    else if jj.ev.err == 1 { jj.ev.err = 0; pc = jj.m.cpc[sp]; resumed = true; }
+                } else if kf == Fr.GUARD { jj.ev.errfrom = jj.m.ce[sp]; }
+                else if kf == Fr.CATCH {
+                    if jj.ev.stopto == jj.m.ce[sp] { jj.ev.stopto = -1; pc = jj.m.cpc[sp]; resumed = true; }
+                }
+            }
+            if !resumed { return 1; }
+        }
+    }
+    return 0;
+}

@@ -1,0 +1,158 @@
+// The bytecode program (docs/bytecode-design.md, section 4): instruction arrays, the register file, the frame stack.
+// An instruction is an opcode and four operands (ia, ib, ic, id); a jump target is always in `ic`. Operands that are registers
+// index the register file `jj.m.rv` (entries of the value arena, or plain integers for counters). Registers are never reused:
+// every node input, variable, counter and temporary of the lowering gets its own.
+
+const Op {
+    // 0 control
+    RET: i64 = 0;       // return to the caller of the last GOSUB; with no caller the body is done
+    JMP: i64 = 1;       // pc = ic
+    JT: i64 = 2;        // if truthy(r[ia]) pc = ic
+    JF: i64 = 3;        // if not truthy(r[ia]) pc = ic
+    JNZ: i64 = 4;       // if r[ia] != 0 pc = ic (a counter)
+    JZ: i64 = 5;
+    GOSUB: i64 = 6;     // push the return address, pc = ic
+    GOSUBC: i64 = 7;    // as GOSUB, and a stop request for node ib ends the call normally (limit, first, nth, isempty)
+    TRYB: i64 = 8;      // push a handler frame: an error caught by it goes on at ic; ib is the try node
+    GUARD: i64 = 9;     // push a guard frame: an error passing it did not come from the try body (ib is the try node)
+    POPF: i64 = 10;     // pop a TRYB or GUARD frame
+    STOP: i64 = 11;     // ask the construct ib to stop its enumeration (unwind)
+    FATAL: i64 = 12;    // not supported at run time: message ib
+    RAISE: i64 = 13;    // error(r[ia])
+    JLT: i64 = 14;      // if r[ia] < r[ib] (integers) pc = ic
+    // 1 data
+    MOV: i64 = 16;      // r[ia] = r[ib]
+    LDI: i64 = 17;      // r[ia] = ib (a constant entry or an integer)
+    LOADN: i64 = 18;    // r[ia] = the value of automaton node ib
+    LDERR: i64 = 19;    // r[ia] = the value of the last error
+    INC: i64 = 20;      // r[ia] += 1
+    // 2 operators
+    ARITH: i64 = 32;    // r[ia] = r[ib] op r[ic], op in id
+    CMP: i64 = 33;
+    CMPLIT: i64 = 34;   // r[ia] = slot of node ib against the literal ic, op in id
+    NEG: i64 = 35;
+    BOOLT: i64 = 36;    // r[ia] = the boolean of the truth of r[ib]
+    JNCL: i64 = 37;     // fused select: if not (slot of node ib, op ia, literal id) pc = ic (an error is raised)
+    // 3 navigation and builtins
+    FIELD: i64 = 48;    // r[ia] = r[ib].key with the key at [ic, ic + id) of the filter's keys
+    IDX: i64 = 49;      // r[ia] = r[ib][ic]
+    SLICE: i64 = 50;    // r[ia] = r[ib][r[ic] : r[id]]
+    FN: i64 = 51;       // r[ia] = builtin id of r[ib]
+    HAS: i64 = 52;      // r[ia] = r[ib] | has(r[ic])
+    TYPEMASK: i64 = 53; // r[ia] = r[ib] is of a type in the mask id
+    // 4 construction and collectors
+    OBJB: i64 = 64;     // r[ia] = a new empty object
+    OBJCK: i64 = 65;    // the key r[ia] must be a string
+    OBJP: i64 = 66;     // add the pair (r[ib], r[ic]) to the object r[ia]
+    ARRS: i64 = 67;     // r[ia] = the list a scope body collected (scope ib)
+    REGCLR: i64 = 68;   // clear collector ia
+    REGLIST: i64 = 69;  // r[ia] = the list of collector ib
+    FOLDS: i64 = 70;    // r[ia] = the fold of scope ib, kind ic
+    FOLDR: i64 = 71;    // r[ia] = the fold of collector ib, kind ic
+    ISEMP: i64 = 72;    // r[ia] = r[ib] == 0 as a boolean
+    // 5 generators and scopes
+    PLAYB: i64 = 80;    // check the iteration of scope ib; r[ia] = first entry of its collector
+    LISTN: i64 = 81;    // next entry of a chain: r[ia] the cursor, r[ib] gets the entry, pc = ic at the end
+    PLAYE: i64 = 82;    // raise the deferred error of scope ia, if any
+    PLAYC: i64 = 83;    // check the iteration of scope ia
+    ITRB: i64 = 84;     // start iterating the value r[ib], cursor in ia and ia + 1
+    ITRN: i64 = 85;
+    RNGI: i64 = 86;     // range bounds r[ib], r[ic], r[id], state in ia ..
+    RNGN: i64 = 87;
+    LIMI: i64 = 88;     // limit count r[ib] of node id into r[ia]; pc = ic when there is nothing to run
+    REGFIRST: i64 = 89; // r[ia] = first entry of collector ib
+    UNTILCHK: i64 = 90;
+    // 6 terminals
+    PRINT: i64 = 96;
+    APPR: i64 = 97;     // append r[ib] to collector ia (id 0: the collector's depth, 1: the current depth)
+    FOLDA: i64 = 98;    // add r[ib] to the add fold ia
+    FOLDC: i64 = 99;    // count fold ia
+}
+
+const Fr {
+    CALL: i64 = 0;
+    TRY: i64 = 1;
+    GUARD: i64 = 2;
+    CATCH: i64 = 3;
+}
+
+const Cl {
+    NI: i64 = 16384;             // instructions
+    NR: i64 = 20000;             // registers
+    NF: i64 = 2048;              // frames of the explicit stack
+}
+
+struct Code {
+    n: i64;
+    iop: u8[16384];
+    ia: i32[16384];
+    ib: i32[16384];
+    ic: i32[16384];
+    id: i32[16384];
+    ipos: i32[16384];
+    entry: i64[34];               // per scope, 32 the root: the first instruction
+    ein: i64[34];                 // per scope, 32 the root: the register the input goes in
+    nreg: i64;
+    err: bool;
+    // lowering state
+    nr: i32[1024];                // per node: the register its input arrives in (-1 none yet)
+    lab: i32[1024];               // per node: the first instruction of its block (-1 not emitted)
+    qd: i32[1024];                // per node: 1 when its block was queued
+    vreg: i32[64];                // per variable slot
+    vinreg: i32[64];
+    rsreg: i32[64];               // per reduce register: the state
+    // frames (the terminal of a chain)
+    nt: i64;
+    tk: i32[1200];                // kind, as the walker's terminal kinds: 1 print, 2 register, 3 add, 4 count, 5 register at the current depth, 6 //, 7 try, 8 hold, 9 limit, 10 isempty, 12 nth, 14 skip
+    tow: i32[1200];               // the node that owns the frame (a scope index + 1000 for a scope, 2000 for the root)
+    tpar: i32[1200];              // the frame below
+    tdep: i32[1200];
+    tin: i32[1200];               // registers: the input, a count, a held value, a limit
+    tcn: i32[1200];
+    thd: i32[1200];
+    tlm: i32[1200];
+    tr: i32[1200];                // the collector or fold register, -1 none
+    tlab: i32[1200];              // the first instruction of the frame's terminal block, -1 not emitted
+    tqd: i32[1200];
+    // work list: blocks (kind 0, node, frame) and terminals (kind 1, frame)
+    wn: i64;
+    wk: i32[4400];
+    wa: i32[4400];
+    wb: i32[4400];
+    // jump fixups to node blocks (kind 0) and terminals (kind 1)
+    nf: i64;
+    fi: i32[8192];
+    fk: i32[8192];
+    fa: i32[8192];
+    lastfix: i64;
+    curt: i64;                    // the frame being lowered
+}
+
+// the machine: registers and the explicit frame stack
+struct Mach {
+    rv: i64[20000];
+    rf: f64[20000];
+    ck: u8[2048];
+    cpc: i32[2048];
+    ce: i32[2048];
+}
+
+fn emit(op: i64, a: i64, b: i64, c: i64, d: i64, pos: i64) -> i64 {
+    let n = jj.c.n;
+    if n >= 16383 { jj.c.err = true; jj.err = "jx: the filter is too big (16384 instructions)"; jj.exitc = 1; return 0; }
+    jj.c.iop[n] = op;
+    jj.c.ia[n] = a;
+    jj.c.ib[n] = b;
+    jj.c.ic[n] = c;
+    jj.c.id[n] = d;
+    jj.c.ipos[n] = pos;
+    jj.c.n = n + 1;
+    return n;
+}
+
+fn newreg() -> i64 {
+    let r = jj.c.nreg;
+    if r >= 19990 { jj.c.err = true; jj.err = "jx: the filter is too big (20000 registers)"; jj.exitc = 1; return 0; }
+    jj.c.nreg = r + 1;
+    return r;
+}

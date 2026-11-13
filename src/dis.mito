@@ -1,0 +1,98 @@
+// The disassembler: `--dump-program` prints the bytecode of the filter (docs/bytecode-design.md, 4.10) and stops before reading input.
+
+fn opname(op: i64) -> text {
+    if op == Op.RET { return "RET"; }
+    if op == Op.JMP { return "JMP"; }
+    if op == Op.JT { return "JT"; }
+    if op == Op.JF { return "JF"; }
+    if op == Op.JNZ { return "JNZ"; }
+    if op == Op.JZ { return "JZ"; }
+    if op == Op.GOSUB { return "GOSUB"; }
+    if op == Op.GOSUBC { return "GOSUBC"; }
+    if op == Op.TRYB { return "TRYB"; }
+    if op == Op.GUARD { return "GUARD"; }
+    if op == Op.POPF { return "POPF"; }
+    if op == Op.STOP { return "STOP"; }
+    if op == Op.FATAL { return "FATAL"; }
+    if op == Op.RAISE { return "RAISE"; }
+    if op == Op.JLT { return "JLT"; }
+    if op == Op.MOV { return "MOV"; }
+    if op == Op.LDI { return "LDI"; }
+    if op == Op.LOADN { return "LOADN"; }
+    if op == Op.LDERR { return "LDERR"; }
+    if op == Op.INC { return "INC"; }
+    if op == Op.ARITH { return "ARITH"; }
+    if op == Op.CMP { return "CMP"; }
+    if op == Op.CMPLIT { return "CMPLIT"; }
+    if op == Op.NEG { return "NEG"; }
+    if op == Op.BOOLT { return "BOOLT"; }
+    if op == Op.JNCL { return "JNCL"; }
+    if op == Op.FIELD { return "FIELD"; }
+    if op == Op.IDX { return "IDX"; }
+    if op == Op.SLICE { return "SLICE"; }
+    if op == Op.FN { return "FN"; }
+    if op == Op.HAS { return "HAS"; }
+    if op == Op.TYPEMASK { return "TYPEMASK"; }
+    if op == Op.OBJB { return "OBJB"; }
+    if op == Op.OBJCK { return "OBJCK"; }
+    if op == Op.OBJP { return "OBJP"; }
+    if op == Op.ARRS { return "ARRS"; }
+    if op == Op.REGCLR { return "REGCLR"; }
+    if op == Op.REGLIST { return "REGLIST"; }
+    if op == Op.FOLDS { return "FOLDS"; }
+    if op == Op.FOLDR { return "FOLDR"; }
+    if op == Op.ISEMP { return "ISEMP"; }
+    if op == Op.PLAYB { return "PLAYB"; }
+    if op == Op.LISTN { return "LISTN"; }
+    if op == Op.PLAYE { return "PLAYE"; }
+    if op == Op.PLAYC { return "PLAYC"; }
+    if op == Op.ITRB { return "ITRB"; }
+    if op == Op.ITRN { return "ITRN"; }
+    if op == Op.RNGI { return "RNGI"; }
+    if op == Op.RNGN { return "RNGN"; }
+    if op == Op.LIMI { return "LIMI"; }
+    if op == Op.REGFIRST { return "REGFIRST"; }
+    if op == Op.UNTILCHK { return "UNTILCHK"; }
+    if op == Op.PRINT { return "PRINT"; }
+    if op == Op.APPR { return "APPR"; }
+    if op == Op.FOLDA { return "FOLDA"; }
+    if op == Op.FOLDC { return "FOLDC"; }
+    return "?";
+}
+
+fn zpad(x: i64, n: i64) {
+    var k = 1;
+    var m = 10;
+    while m <= x && k < n { m = m * 10; k += 1; }
+    while k < n { jj.o.text += "0"; k += 1; }
+    jj.o.text += str(x);
+}
+
+fn dump_program(filter: text) {
+    jj.o.text += "filter " + filter + "
+";
+    var s = 0;
+    while s < jj.f.nscope {
+        jj.o.text += "scope " + str(s) + "  term " + str(jj.f.s_term[s]) + "  entry ";
+        zpad(jj.c.entry[s], 4);
+        jj.o.text += "  input r" + str(jj.c.ein[s]) + "
+";
+        s += 1;
+    }
+    jj.o.text += "root  entry ";
+    zpad(jj.c.entry[32], 4);
+    jj.o.text += "  input r" + str(jj.c.ein[32]) + "
+";
+    var i = 0;
+    while i < jj.c.n {
+        jj.o.text += "  ";
+        zpad(i, 4);
+        let nm = opname(jj.c.iop[i]);
+        jj.o.text += "  " + nm;
+        var k = len(nm);
+        while k < 9 { jj.o.text += " "; k += 1; }
+        jj.o.text += str(jj.c.ia[i]) + ", " + str(jj.c.ib[i]) + ", " + str(jj.c.ic[i]) + ", " + str(jj.c.id[i]) + "   ; col " + str(jj.c.ipos[i]) + "
+";
+        i += 1;
+    }
+}

@@ -2112,7 +2112,9 @@ fn run_unit(doc: text, filter: text, n: i64) -> i64 {
                 jj.ev.tk[0] = term;
                 jj.ev.ta[0] = r;
                 jj.ev.tp = 1;
-                var x = run(doc, filter, jj.f.s_body[s], h);
+                var x = 0;
+                if Lim.ENGINE == 1 { jj.m.rv[jj.c.ein[s]] = h; x = exec(doc, filter, jj.c.entry[s]); }
+                else { x = run(doc, filter, jj.f.s_body[s], h); }
                 if x != 0 {
                     if jj.ev.err == 1 && term != 1 { jj.ev.rerr[r] = 1; jj.ev.emsg = jj.ev.rawmsg; jj.ev.rerrv[r] = copy_deep(jj.ev.errv, 0); x = 0; jj.ev.err = 0; }
                 }
@@ -2142,7 +2144,10 @@ fn run_root(doc: text, filter: text) -> i64 {
     var v = jj.ev.hnull;
     if jj.f.want[0] != 0 { v = node_val(0); }
     var rc = 1;
-    if v >= 0 { rc = run(doc, filter, jj.f.root, v); }
+    if v >= 0 {
+        if Lim.ENGINE == 1 { jj.m.rv[jj.c.ein[32]] = v; rc = exec(doc, filter, jj.c.entry[32]); }
+        else { rc = run(doc, filter, jj.f.root, v); }
+    }
     if rc != 0 && len(jj.err) == 0 { jj.err = "jx: error"; }
     return rc;
 }

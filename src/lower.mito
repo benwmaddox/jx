@@ -1,0 +1,712 @@
+// Lowering: the expression tree (after compile.mito's analysis) to the bytecode of code.mito. The lowering keeps the walker's
+// structure: a *chain* (the nodes linked by `nx`, ending in the terminal of its frame) is a run of blocks, one per node; a
+// construct that gives its outputs to a continuation (`,`, `.[]`, `range`, ...) calls the continuation block with GOSUB, so the
+// terminal frame the walker kept on a dynamic stack is fixed here: every terminal is one block of code, emitted once.
+// A block's input value is in the register of its node (reg_of), so a value passes from one node to the next by writing the
+// next node's register. Single-output expressions (the walker's `evs`) are straight-line code (lx).
+
+fn head(e: i64) -> i64 {
+    var h = e;
+    while jj.f.ak[h] == K.PIPE { h = jj.f.aa[h]; }
+    return h;
+}
+
+fn reg_of(e: i64) -> i64 {
+    let h = head(e);
+    if jj.c.nr[h] < 0 { jj.c.nr[h] = newreg(); }
+    return jj.c.nr[h];
+}
+
+fn var_reg(slot: i64) -> i64 {
+    if jj.c.vreg[slot] < 0 { jj.c.vreg[slot] = newreg(); }
+    return jj.c.vreg[slot];
+}
+
+fn varin_reg(slot: i64) -> i64 {
+    if jj.c.vinreg[slot] < 0 { jj.c.vinreg[slot] = newreg(); }
+    return jj.c.vinreg[slot];
+}
+
+fn rs_reg(r: i64) -> i64 {
+    if jj.c.rsreg[r] < 0 { jj.c.rsreg[r] = newreg(); }
+    return jj.c.rsreg[r];
+}
+
+fn new_frame(kind: i64, owner: i64, parent: i64) -> i64 {
+    let t = jj.c.nt;
+    if t >= 1199 { jj.c.err = true; jj.err = "jx: the filter is too big (terminal frames)"; jj.exitc = 1; return 0; }
+    jj.c.nt = t + 1;
+    jj.c.tk[t] = kind;
+    jj.c.tow[t] = owner;
+    jj.c.tpar[t] = parent;
+    if parent >= 0 { jj.c.tdep[t] = jj.c.tdep[parent] + 1; } else { jj.c.tdep[t] = 1; }
+    jj.c.tin[t] = newreg();
+    jj.c.tcn[t] = newreg();
+    jj.c.thd[t] = newreg();
+    jj.c.tlm[t] = newreg();
+    jj.c.tr[t] = -1;
+    jj.c.tlab[t] = -1;
+    jj.c.tqd[t] = 0;
+    return t;
+}
+
+fn push_work(kind: i64, a: i64, b: i64) {
+    let w = jj.c.wn;
+    if w >= 4399 { jj.c.err = true; jj.err = "jx: the filter is too big (work list)"; jj.exitc = 1; return; }
+    jj.c.wk[w] = kind;
+    jj.c.wa[w] = a;
+    jj.c.wb[w] = b;
+    jj.c.wn = w + 1;
+}
+
+fn queue_block(h: i64, t: i64) {
+    if jj.c.qd[h] == 0 { jj.c.qd[h] = 1; push_work(0, h, t); }
+}
+
+fn queue_term(t: i64) {
+    if jj.c.tqd[t] == 0 { jj.c.tqd[t] = 1; push_work(1, t, 0); }
+}
+
+fn fixup(i: i64, kind: i64, a: i64) {
+    let f = jj.c.nf;
+    if f >= 8191 { jj.c.err = true; jj.err = "jx: the filter is too big (jumps)"; jj.exitc = 1; return; }
+    jj.c.fi[f] = i;
+    jj.c.fk[f] = kind;
+    jj.c.fa[f] = a;
+    jj.c.nf = f + 1;
+}
+
+// a jump or call to the block of node n (frame t), or to the terminal of t when n < 0
+fn jump_to(n: i64, t: i64, op: i64) {
+    if n >= 0 {
+        let h = head(n);
+        queue_block(h, t);
+        let i = emit(op, 0, 0, 0, 0, jj.f.at[h]);
+        fixup(i, 0, h);
+    } else {
+        queue_term(t);
+        let i = emit(op, 0, 0, 0, 0, 0);
+        fixup(i, 1, t);
+    }
+}
+
+// the register the input of node n arrives in (the terminal's when n < 0)
+fn succ_reg(n: i64, t: i64) -> i64 {
+    if n >= 0 { return reg_of(n); }
+    return jj.c.tin[t];
+}
+
+// continue with node n (frame t) with the value in register from: op JMP (the chain goes on) or GOSUB (a continuation call)
+fn goto_node(n: i64, from: i64, t: i64, op: i64) {
+    let r = succ_reg(n, t);
+    if r != from { emit(Op.MOV, r, from, 0, 0, 0); }
+    jump_to(n, t, op);
+}
+
+// drop a JMP to the block about to be emitted
+fn begin_target(kind: i64, a: i64) {
+    let n = jj.c.n;
+    let f = jj.c.nf;
+    if n > 0 && f > 0 {
+        if jj.c.fi[f - 1] == n - 1 && jj.c.fk[f - 1] == kind && jj.c.fa[f - 1] == a && jj.c.iop[n - 1] == Op.JMP {
+            jj.c.n = n - 1;
+            jj.c.nf = f - 1;
+        }
+    }
+}
+
+fn check_depth(t: i64) {
+    if jj.c.tdep[t] >= 60 { emit(Op.FATAL, 0, 0, 0, 0, 0); }
+}
+
+fn nl(what: text, e: i64) -> i64 {
+    if !jj.c.err {
+        jj.c.err = true;
+        jj.exitc = 1;
+        jj.err = "jx: bytecode: not lowered yet: " + what + " (filter position " + str(jj.f.at[e]) + ")";
+    }
+    return 0;
+}
+
+fn patch_here(i: i64) {
+    jj.c.ic[i] = jj.c.n;
+}
+
+fn dst_reg(dst: i64) -> i64 {
+    if dst >= 0 { return dst; }
+    return newreg();
+}
+
+fn put_in(r: i64, dst: i64) -> i64 {
+    if dst >= 0 && dst != r { emit(Op.MOV, dst, r, 0, 0, 0); return dst; }
+    return r;
+}
+
+// straight-line code for an expression with exactly one output (the walker's evs): the register holding the value, in dst when dst >= 0
+fn lx(e: i64, vin: i64, dst: i64) -> i64 {
+    let k = jj.f.ak[e];
+    let pos = jj.f.at[e];
+    if jj.c.err { return 0; }
+    if k == K.NODE {
+        let d = dst_reg(dst);
+        emit(Op.LOADN, d, jj.f.aa[e], 0, 0, pos);
+        return d;
+    }
+    if k == K.ID { return put_in(vin, dst); }
+    if k == K.LIT {
+        let d = dst_reg(dst);
+        emit(Op.LDI, d, jj.f.aa[e], 0, 0, pos);
+        return d;
+    }
+    if k == K.CMPLIT {
+        let d = dst_reg(dst);
+        emit(Op.CMPLIT, d, jj.f.aa[e], jj.f.ab[e], jj.f.ac[e], pos);
+        return d;
+    }
+    if k == K.BIN {
+        let x = lx(jj.f.aa[e], vin, -1);
+        let y = lx(jj.f.ab[e], vin, -1);
+        let d = dst_reg(dst);
+        let op = jj.f.ac[e];
+        if op >= 21 { emit(Op.ARITH, d, x, y, op, pos); } else { emit(Op.CMP, d, x, y, op, pos); }
+        return d;
+    }
+    if k == K.FIELD {
+        let s = lx(jj.f.aa[e], vin, -1);
+        let d = dst_reg(dst);
+        emit(Op.FIELD, d, s, jj.f.ab[e], jj.f.ac[e], pos);
+        return d;
+    }
+    if k == K.IDX {
+        let s = lx(jj.f.aa[e], vin, -1);
+        let d = dst_reg(dst);
+        emit(Op.IDX, d, s, jj.f.ab[e], 0, pos);
+        return d;
+    }
+    if k == K.PIPE {
+        let x = lx(jj.f.aa[e], vin, -1);
+        return lx(jj.f.ab[e], x, dst);
+    }
+    if k == K.AND {
+        let x = lx(jj.f.aa[e], vin, -1);
+        let d = dst_reg(dst);
+        let j1 = emit(Op.JF, x, 0, 0, 0, pos);
+        let y = lx(jj.f.ab[e], vin, -1);
+        emit(Op.BOOLT, d, y, 0, 0, pos);
+        let j2 = emit(Op.JMP, 0, 0, 0, 0, pos);
+        patch_here(j1);
+        emit(Op.LDI, d, jj.ev.hfalse, 0, 0, pos);
+        patch_here(j2);
+        return d;
+    }
+    if k == K.OR {
+        let x = lx(jj.f.aa[e], vin, -1);
+        let d = dst_reg(dst);
+        let j1 = emit(Op.JT, x, 0, 0, 0, pos);
+        let y = lx(jj.f.ab[e], vin, -1);
+        emit(Op.BOOLT, d, y, 0, 0, pos);
+        let j2 = emit(Op.JMP, 0, 0, 0, 0, pos);
+        patch_here(j1);
+        emit(Op.LDI, d, jj.ev.htrue, 0, 0, pos);
+        patch_here(j2);
+        return d;
+    }
+    if k == K.ALT {
+        let x = lx(jj.f.aa[e], vin, -1);
+        let d = dst_reg(dst);
+        emit(Op.MOV, d, x, 0, 0, pos);
+        let j1 = emit(Op.JT, x, 0, 0, 0, pos);
+        lx(jj.f.ab[e], vin, d);
+        patch_here(j1);
+        return d;
+    }
+    if k == K.NEG {
+        let x = lx(jj.f.aa[e], vin, -1);
+        let d = dst_reg(dst);
+        emit(Op.NEG, d, x, 0, 0, pos);
+        return d;
+    }
+    if k == K.IF {
+        let c = lx(jj.f.aa[e], vin, -1);
+        let d = dst_reg(dst);
+        let j1 = emit(Op.JF, c, 0, 0, 0, pos);
+        lx(jj.f.ab[e], vin, d);
+        let j2 = emit(Op.JMP, 0, 0, 0, 0, pos);
+        patch_here(j1);
+        lx(jj.f.ac[e], vin, d);
+        patch_here(j2);
+        return d;
+    }
+    if k == K.OBJ {
+        let d = dst_reg(dst);
+        emit(Op.OBJB, d, 0, 0, 0, pos);
+        var i = 0;
+        let first = jj.f.aa[e];
+        while i < jj.f.ab[e] {
+            let kx = lx(jj.f.okey[first + i], vin, -1);
+            emit(Op.OBJCK, kx, 0, 0, 0, pos);
+            let vx = lx(jj.f.oval[first + i], vin, -1);
+            emit(Op.OBJP, d, kx, vx, 0, pos);
+            i += 1;
+        }
+        return d;
+    }
+    if k == K.SLICE {
+        let s = lx(jj.f.aa[e], vin, -1);
+        var lo = newreg();
+        var hi = newreg();
+        if jj.f.ab[e] >= 0 { lx(jj.f.ab[e], vin, lo); } else { emit(Op.LDI, lo, jj.ev.hnull, 0, 0, pos); }
+        if jj.f.ac[e] >= 0 { lx(jj.f.ac[e], vin, hi); } else { emit(Op.LDI, hi, jj.ev.hnull, 0, 0, pos); }
+        let d = dst_reg(dst);
+        emit(Op.SLICE, d, s, lo, hi, pos);
+        return d;
+    }
+    if k == K.VAR { return put_in(var_reg(jj.f.ac[e]), dst); }
+    if k == K.AS {
+        let x = lx(jj.f.aa[e], vin, -1);
+        emit(Op.MOV, var_reg(jj.f.ac[e]), x, 0, 0, pos);
+        return lx(jj.f.ab[e], vin, dst);
+    }
+    if k == K.ERROR {
+        let x = lx(jj.f.aa[e], vin, -1);
+        emit(Op.RAISE, x, 0, 0, 0, pos);
+        return put_in(x, dst);
+    }
+    if k == K.REDUCE {
+        let init = lx(jj.f.ad[e], vin, -1);
+        let rb = jj.f.ae[e];
+        let rs = rs_reg(jj.f.ad[rb]);
+        emit(Op.MOV, rs, init, 0, 0, pos);
+        goto_node(jj.f.aa[e], vin, jj.c.curt, Op.GOSUB);
+        return put_in(rs, dst);
+    }
+    if k == K.UNTIL {
+        let sr = newreg();
+        let cnt = newreg();
+        emit(Op.MOV, sr, vin, 0, 0, pos);
+        emit(Op.LDI, cnt, 0, 0, 0, pos);
+        let top = jj.c.n;
+        let c = lx(jj.f.aa[e], sr, -1);
+        let j1 = emit(Op.JT, c, 0, 0, 0, pos);
+        lx(jj.f.ab[e], sr, sr);
+        emit(Op.UNTILCHK, cnt, 0, 0, 0, pos);
+        emit(Op.JMP, 0, 0, top, 0, pos);
+        patch_here(j1);
+        return put_in(sr, dst);
+    }
+    if k == K.LIMIT && jj.f.ac[e] == 3 {
+        // isempty
+        let t = jj.c.curt;
+        check_depth(t);
+        let ft = new_frame(10, e, t);
+        emit(Op.LDI, jj.c.tcn[ft], 0, 0, 0, pos);
+        let r = succ_reg(jj.f.ab[e], ft);
+        emit(Op.MOV, r, vin, 0, 0, pos);
+        let h = head(jj.f.ab[e]);
+        queue_block(h, ft);
+        let i = emit(Op.GOSUBC, 0, e, 0, 0, pos);
+        fixup(i, 0, h);
+        let d = dst_reg(dst);
+        emit(Op.ISEMP, d, jj.c.tcn[ft], 0, 0, pos);
+        return d;
+    }
+    if k == K.ARR {
+        let d = dst_reg(dst);
+        if jj.f.aa[e] < 0 { emit(Op.LDI, d, jj.ev.harr0, 0, 0, pos); return d; }
+        if jj.f.ab[e] >= 0 { emit(Op.ARRS, d, jj.f.ab[e], 0, 0, pos); return d; }
+        let r = jj.f.ac[e];
+        let t = jj.c.curt;
+        emit(Op.REGCLR, r, 0, 0, 0, pos);
+        check_depth(t);
+        let ft = new_frame(5, e, t);
+        jj.c.tr[ft] = r;
+        goto_node(jj.f.aa[e], vin, ft, Op.GOSUB);
+        emit(Op.REGLIST, d, r, 0, 0, pos);
+        return d;
+    }
+    if k == K.FOLD {
+        let d = dst_reg(dst);
+        let kind = jj.f.ac[e];
+        if jj.f.ab[e] >= 0 { emit(Op.FOLDS, d, jj.f.ab[e], kind, 0, pos); return d; }
+        let r = jj.f.ad[e];
+        let t = jj.c.curt;
+        emit(Op.REGCLR, r, 0, 0, 0, pos);
+        check_depth(t);
+        let ft = new_frame(3 + kind - 1, e, t);
+        jj.c.tr[ft] = r;
+        goto_node(jj.f.aa[e], vin, ft, Op.GOSUB);
+        emit(Op.FOLDR, d, r, kind, 0, pos);
+        return d;
+    }
+    if k == K.FN {
+        let d = dst_reg(dst);
+        let id = jj.f.ac[e];
+        if id == F.HAS {
+            let a = lx(jj.f.aa[e], vin, -1);
+            emit(Op.HAS, d, vin, a, 0, pos);
+            return d;
+        }
+        if id == F.TYPEMASK { emit(Op.TYPEMASK, d, vin, 0, jj.f.ad[e], pos); return d; }
+        emit(Op.FN, d, vin, 0, id, pos);
+        return d;
+    }
+    emit(Op.FATAL, 0, 1, 0, 0, pos);
+    return put_in(vin, dst);
+}
+
+// the block of the single-output or generator node h (frame t)
+fn lower_block(h: i64, t: i64) {
+    jj.c.curt = t;
+    let e = h;
+    jj.c.lab[e] = jj.c.n;
+    let x = reg_of(e);
+    let k = jj.f.ak[e];
+    let pos = jj.f.at[e];
+    let nxt = jj.f.nx[e];
+    if k == K.SELECT {
+        let c = lx(jj.f.aa[e], x, -1);
+        emit(Op.JF, c, 0, 0, 0, pos);
+        goto_node(nxt, x, t, Op.JMP);
+        return;
+    }
+    if k == K.EMPTY { emit(Op.RET, 0, 0, 0, 0, pos); return; }
+    if k == K.COMMA {
+        goto_node(jj.f.aa[e], x, t, Op.GOSUB);
+        goto_node(jj.f.ab[e], x, t, Op.JMP);
+        return;
+    }
+    if k == K.IF {
+        let c = lx(jj.f.aa[e], x, -1);
+        let j1 = emit(Op.JF, c, 0, 0, 0, pos);
+        goto_node(jj.f.ab[e], x, t, Op.JMP);
+        patch_here(j1);
+        goto_node(jj.f.ac[e], x, t, Op.JMP);
+        return;
+    }
+    if k == K.ALT && jj.f.ad[e] == 1 {
+        check_depth(t);
+        let ft = new_frame(6, e, t);
+        emit(Op.LDI, jj.c.tcn[ft], 0, 0, 0, pos);
+        goto_node(jj.f.aa[e], x, ft, Op.GOSUB);
+        emit(Op.JNZ, jj.c.tcn[ft], 0, 0, 0, pos);
+        goto_node(jj.f.ab[e], x, t, Op.JMP);
+        return;
+    }
+    if k == K.ALT {
+        let y = lx(jj.f.aa[e], x, -1);
+        let j1 = emit(Op.JF, y, 0, 0, 0, pos);
+        goto_node(nxt, y, t, Op.JMP);
+        patch_here(j1);
+        goto_node(jj.f.ab[e], x, t, Op.JMP);
+        return;
+    }
+    if k == K.PLAY {
+        let s = jj.f.aa[e];
+        if jj.f.s_term[s] == 1 {
+            emit(Op.PLAYC, s, 0, 0, 0, pos);
+            emit(Op.RET, 0, 0, 0, 0, pos);
+            return;
+        }
+        let cur = newreg();
+        let p = succ_reg(nxt, t);
+        emit(Op.PLAYB, cur, s, 0, 0, pos);
+        let top = jj.c.n;
+        let j1 = emit(Op.LISTN, cur, p, 0, 0, pos);
+        jump_to(nxt, t, Op.GOSUB);
+        emit(Op.JMP, 0, 0, top, 0, pos);
+        patch_here(j1);
+        emit(Op.PLAYE, s, 0, 0, 0, pos);
+        emit(Op.RET, 0, 0, 0, 0, pos);
+        return;
+    }
+    if k == K.AS && (cls(jj.f.aa[e]) != 0 || cls(jj.f.ab[e]) != 0) {
+        emit(Op.MOV, varin_reg(jj.f.ac[e]), x, 0, 0, pos);
+        goto_node(jj.f.aa[e], x, t, Op.JMP);
+        return;
+    }
+    if k == K.VARBIND {
+        let slot = jj.f.ac[e];
+        emit(Op.MOV, var_reg(slot), x, 0, 0, pos);
+        goto_node(jj.f.ab[e], varin_reg(slot), t, Op.JMP);
+        return;
+    }
+    if k == K.AS {
+        let y = lx(jj.f.aa[e], x, -1);
+        emit(Op.MOV, var_reg(jj.f.ac[e]), y, 0, 0, pos);
+        goto_node(jj.f.ab[e], x, t, Op.JMP);
+        return;
+    }
+    if k == K.RBIND {
+        let slot = jj.f.ac[e];
+        let r = jj.f.ad[e];
+        let rs = rs_reg(r);
+        emit(Op.MOV, var_reg(slot), x, 0, 0, pos);
+        check_depth(t);
+        let ft = new_frame(8, e, t);
+        emit(Op.LDI, jj.c.tcn[ft], 0, 0, 0, pos);
+        goto_node(jj.f.ab[e], rs, ft, Op.GOSUB);
+        let j1 = emit(Op.JZ, jj.c.tcn[ft], 0, 0, 0, pos);
+        emit(Op.MOV, rs, jj.c.thd[ft], 0, 0, pos);
+        emit(Op.RET, 0, 0, 0, 0, pos);
+        patch_here(j1);
+        emit(Op.LDI, rs, jj.ev.hnull, 0, 0, pos);
+        emit(Op.RET, 0, 0, 0, 0, pos);
+        return;
+    }
+    if k == K.TRY {
+        check_depth(t);
+        let ft = new_frame(7, e, t);
+        let jt = emit(Op.TRYB, 0, e, 0, 0, pos);
+        goto_node(jj.f.aa[e], x, ft, Op.GOSUB);
+        emit(Op.POPF, 0, 0, 0, 0, pos);
+        emit(Op.RET, 0, 0, 0, 0, pos);
+        if jj.f.ab[e] >= 0 {
+            patch_here(jt);
+            let ev = newreg();
+            emit(Op.LDERR, ev, 0, 0, 0, pos);
+            goto_node(jj.f.ab[e], ev, t, Op.JMP);
+        } else { jj.c.ic[jt] = 0; }
+        return;
+    }
+    if k == K.RANGE {
+        let a = lx(jj.f.aa[e], x, -1);
+        let b = lx(jj.f.ab[e], x, -1);
+        let s = lx(jj.f.ac[e], x, -1);
+        let base = newreg();
+        newreg();
+        newreg();
+        newreg();
+        let w = succ_reg(nxt, t);
+        emit(Op.RNGI, base, a, b, s, pos);
+        let top = jj.c.n;
+        let j1 = emit(Op.RNGN, base, w, 0, 0, pos);
+        jump_to(nxt, t, Op.GOSUB);
+        emit(Op.JMP, 0, 0, top, 0, pos);
+        patch_here(j1);
+        emit(Op.RET, 0, 0, 0, 0, pos);
+        return;
+    }
+    if k == K.LIMIT {
+        let mode = jj.f.ac[e];
+        if mode == 4 {
+            check_depth(t);
+            let ft = new_frame(8, e, t);
+            emit(Op.LDI, jj.c.tcn[ft], 0, 0, 0, pos);
+            goto_node(jj.f.ab[e], x, ft, Op.GOSUB);
+            emit(Op.JZ, jj.c.tcn[ft], 0, 0, 0, pos);
+            goto_node(nxt, jj.c.thd[ft], t, Op.JMP);
+            return;
+        }
+        var kind = 9;
+        if mode == 5 { kind = 12; }
+        if mode == 6 { kind = 14; }
+        let cn = jj.f.aa[e];
+        if cls(cn) == 0 {
+            let nv = lx(cn, x, -1);
+            let ft = new_frame(kind, e, t);
+            emit(Op.LIMI, jj.c.tlm[ft], nv, 0, e, pos);
+            let jskip = jj.c.n - 1;
+            check_depth(t);
+            emit(Op.LDI, jj.c.tcn[ft], 0, 0, 0, pos);
+            let r = succ_reg(jj.f.ab[e], ft);
+            emit(Op.MOV, r, x, 0, 0, pos);
+            let hh = head(jj.f.ab[e]);
+            queue_block(hh, ft);
+            let i = emit(Op.GOSUBC, 0, e, 0, 0, pos);
+            fixup(i, 0, hh);
+            emit(Op.RET, 0, 0, 0, 0, pos);
+            jj.c.ic[jskip] = jj.c.n - 1;
+            return;
+        }
+        // the count is a generator: collect its outputs, then each one in turn
+        let cr = jj.f.ae[e];
+        emit(Op.REGCLR, cr, 0, 0, 0, pos);
+        check_depth(t);
+        let ct = new_frame(5, e, t);
+        jj.c.tr[ct] = cr;
+        goto_node(cn, x, ct, Op.GOSUB);
+        let cur = newreg();
+        let pv = newreg();
+        emit(Op.REGFIRST, cur, cr, 0, 0, pos);
+        let top = jj.c.n;
+        let jend = emit(Op.LISTN, cur, pv, 0, 0, pos);
+        let ft = new_frame(kind, e, t);
+        emit(Op.LIMI, jj.c.tlm[ft], pv, top, e, pos);
+        check_depth(t);
+        emit(Op.LDI, jj.c.tcn[ft], 0, 0, 0, pos);
+        let r = succ_reg(jj.f.ab[e], ft);
+        emit(Op.MOV, r, x, 0, 0, pos);
+        let hh = head(jj.f.ab[e]);
+        queue_block(hh, ft);
+        let i = emit(Op.GOSUBC, 0, e, 0, 0, pos);
+        fixup(i, 0, hh);
+        emit(Op.JMP, 0, 0, top, 0, pos);
+        patch_here(jend);
+        emit(Op.RET, 0, 0, 0, 0, pos);
+        return;
+    }
+    if k == K.ITER {
+        let s = lx(jj.f.aa[e], x, -1);
+        let cur = newreg();
+        newreg();
+        let w = succ_reg(nxt, t);
+        emit(Op.ITRB, cur, s, 0, 0, pos);
+        let top = jj.c.n;
+        let j1 = emit(Op.ITRN, cur, w, 0, 0, pos);
+        jump_to(nxt, t, Op.GOSUB);
+        emit(Op.JMP, 0, 0, top, 0, pos);
+        patch_here(j1);
+        emit(Op.RET, 0, 0, 0, 0, pos);
+        return;
+    }
+    // any other node has one output: compute it into the next node's register
+    let w = succ_reg(nxt, t);
+    lx(e, x, w);
+    jump_to(nxt, t, Op.JMP);
+}
+
+// the terminal block of frame t: what happens to a value that reaches the end of its chain
+fn lower_term(t: i64) {
+    jj.c.curt = jj.c.tpar[t];
+    if jj.c.curt < 0 { jj.c.curt = t; }
+    jj.c.tlab[t] = jj.c.n;
+    let kind = jj.c.tk[t];
+    let h = jj.c.tin[t];
+    let tc = jj.c.tcn[t];
+    let r = jj.c.tr[t];
+    let own = jj.c.tow[t];
+    var pos = 0;
+    if own < 1000 { pos = jj.f.at[own]; }
+    let par = jj.c.tpar[t];
+    var nxt = -1;
+    if own < 1000 { nxt = jj.f.nx[own]; }
+    if kind == 1 { emit(Op.PRINT, h, 0, 0, 0, pos); emit(Op.RET, 0, 0, 0, 0, pos); return; }
+    if kind == 2 { emit(Op.APPR, r, h, 0, 0, pos); emit(Op.RET, 0, 0, 0, 0, pos); return; }
+    if kind == 5 { emit(Op.APPR, r, h, 0, 1, pos); emit(Op.RET, 0, 0, 0, 0, pos); return; }
+    if kind == 3 { emit(Op.FOLDA, r, h, 0, 0, pos); emit(Op.RET, 0, 0, 0, 0, pos); return; }
+    if kind == 4 { emit(Op.FOLDC, r, 0, 0, 0, pos); emit(Op.RET, 0, 0, 0, 0, pos); return; }
+    if kind == 6 {
+        emit(Op.JF, h, 0, 0, 0, pos);
+        emit(Op.INC, tc, 0, 0, 0, pos);
+        goto_node(nxt, h, par, Op.JMP);
+        return;
+    }
+    if kind == 7 {
+        emit(Op.GUARD, 0, own, 0, 0, pos);
+        goto_node(nxt, h, par, Op.GOSUB);
+        emit(Op.POPF, 0, 0, 0, 0, pos);
+        emit(Op.RET, 0, 0, 0, 0, pos);
+        return;
+    }
+    if kind == 8 {
+        emit(Op.MOV, jj.c.thd[t], h, 0, 0, pos);
+        emit(Op.LDI, tc, 1, 0, 0, pos);
+        emit(Op.RET, 0, 0, 0, 0, pos);
+        return;
+    }
+    if kind == 9 {
+        emit(Op.INC, tc, 0, 0, 0, pos);
+        goto_node(nxt, h, par, Op.GOSUB);
+        emit(Op.JLT, tc, jj.c.tlm[t], 0, 0, pos);
+        emit(Op.STOP, 0, own, 0, 0, pos);
+        return;
+    }
+    if kind == 10 {
+        emit(Op.LDI, tc, 1, 0, 0, pos);
+        emit(Op.STOP, 0, own, 0, 0, pos);
+        return;
+    }
+    if kind == 14 {
+        let j1 = emit(Op.JLT, tc, jj.c.tlm[t], 0, 0, pos);
+        goto_node(nxt, h, par, Op.JMP);
+        patch_here(j1);
+        emit(Op.INC, tc, 0, 0, 0, pos);
+        emit(Op.RET, 0, 0, 0, 0, pos);
+        return;
+    }
+    if kind == 12 {
+        let j1 = emit(Op.JLT, tc, jj.c.tlm[t], 0, 0, pos);
+        goto_node(nxt, h, par, Op.GOSUB);
+        emit(Op.STOP, 0, own, 0, 0, pos);
+        patch_here(j1);
+        emit(Op.INC, tc, 0, 0, 0, pos);
+        emit(Op.RET, 0, 0, 0, 0, pos);
+        return;
+    }
+    nl("terminal", 0);
+}
+
+fn lower_prog() -> i64 {
+    jj.c.n = 0;
+    jj.c.nreg = 0;
+    jj.c.nt = 0;
+    jj.c.wn = 0;
+    jj.c.nf = 0;
+    jj.c.err = false;
+    var i = 0;
+    while i < 1024 { jj.c.nr[i] = -1; jj.c.lab[i] = -1; jj.c.qd[i] = 0; i += 1; }
+    i = 0;
+    while i < 64 { jj.c.vreg[i] = -1; jj.c.vinreg[i] = -1; jj.c.rsreg[i] = -1; i += 1; }
+    emit(Op.RET, 0, 0, 0, 0, 0);
+    var s = 0;
+    while s < jj.f.nscope {
+        let t = new_frame(jj.f.s_term[s], 1000 + s, -1);
+        jj.c.tr[t] = jj.f.s_reg[s];
+        let body = jj.f.s_body[s];
+        if body >= 0 {
+            queue_block(head(body), t);
+            jj.c.ein[s] = reg_of(body);
+            jj.c.entry[s] = -2 - head(body);
+        } else {
+            queue_term(t);
+            jj.c.ein[s] = jj.c.tin[t];
+            jj.c.entry[s] = -2000000 - t;
+        }
+        s += 1;
+    }
+    let rt = new_frame(1, 2000, -1);
+    queue_block(head(jj.f.root), rt);
+    jj.c.ein[32] = reg_of(jj.f.root);
+    jj.c.entry[32] = -2 - head(jj.f.root);
+    while jj.c.wn > 0 && !jj.c.err {
+        jj.c.wn -= 1;
+        let w = jj.c.wn;
+        let a = jj.c.wa[w];
+        let b = jj.c.wb[w];
+        if jj.c.wk[w] == 0 { begin_target(0, a); lower_block(a, b); } else { begin_target(1, a); lower_term(a); }
+    }
+    if jj.c.err { return 1; }
+    // resolve the jumps
+    var f = 0;
+    while f < jj.c.nf {
+        var target = -1;
+        if jj.c.fk[f] == 0 { target = jj.c.lab[jj.c.fa[f]]; } else { target = jj.c.tlab[jj.c.fa[f]]; }
+        if target < 0 { jj.err = "jx: internal error: a jump to a block that was not emitted"; jj.exitc = 1; return 1; }
+        jj.c.ic[jj.c.fi[f]] = target;
+        f += 1;
+    }
+    s = 0;
+    while s < 33 {
+        var en = jj.c.entry[s];
+        if s == 32 || s < jj.f.nscope {
+            if en <= -2000000 { jj.c.entry[s] = jj.c.tlab[-2000000 - en]; }
+            else { jj.c.entry[s] = jj.c.lab[-2 - en]; }
+        }
+        s += 1;
+    }
+    return verify();
+}
+
+// every jump lands in the program, every register exists
+fn verify() -> i64 {
+    var i = 0;
+    while i < jj.c.n {
+        let op = jj.c.iop[i];
+        if op == Op.JMP || op == Op.JT || op == Op.JF || op == Op.JNZ || op == Op.JZ || op == Op.GOSUB || op == Op.GOSUBC || op == Op.JLT || op == Op.LISTN || op == Op.ITRN || op == Op.RNGN || op == Op.TRYB {
+            let c = jj.c.ic[i];
+            if c < 0 || c >= jj.c.n { jj.err = "jx: internal error: a jump out of the program at " + str(i); jj.exitc = 1; return 1; }
+        }
+        i += 1;
+    }
+    return 0;
+}
