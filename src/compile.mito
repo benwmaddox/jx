@@ -150,6 +150,94 @@ fn filter_string(f: text, q: i64, to_keys: bool) -> i64 {
     return i + 1;
 }
 
+// the format `@name` (a function of the input), or `@name "string with interpolations"` (the format applied to each interpolated value)
+fn format_id(f: text, e: i64, q: i64) -> i64 {
+    let w = substr(f, q + 1, e - q - 1);
+    if w == "text" { return 0; }
+    if w == "json" { return 14; }
+    if w == "csv" { return 35; }
+    if w == "tsv" { return 36; }
+    if w == "html" { return 37; }
+    if w == "uri" { return 38; }
+    if w == "sh" { return 39; }
+    if w == "base64" { return 40; }
+    if w == "base64d" { return 41; }
+    return -1;
+}
+
+fn parse_format(f: text, q: i64) -> i64 {
+    var e = q + 1;
+    while is_name_char(byte_at(f, e)) { e += 1; }
+    let id = format_id(f, e, q);
+    if id < 0 { return syn1(substr(f, q + 1, e - q - 1) + " is not a valid format", q); }
+    let q2 = skip_ws(f, e);
+    if byte_at(f, q2) == 34 { return parse_string(f, q2, id); }
+    jj.cp = e;
+    if id == 0 { return mk(K.FN, -1, -1, F.TOSTRING, q); }
+    return mk(K.FN, -1, -1, id, q);
+}
+
+// a piece of a string literal of the filter from i, unescaped onto `lits`: up to the closing quote or the `\(` of an interpolation (the position of it), or -1
+fn string_piece(f: text, i0: i64) -> i64 {
+    var i = i0;
+    var rs = i;
+    while true {
+        let c = byte_at(f, i);
+        if c < 0 { jj.err = "jx: a string in the filter does not end"; return -1; }
+        if c == 34 { break; }
+        if c != 92 { i += 1; continue; }
+        let d = byte_at(f, i + 1);
+        if d == 40 { break; }
+        if !(d == 34 || d == 92 || d == 47 || d == 98 || d == 102 || d == 110 || d == 114 || d == 116 || d == 117) {
+            jj.err = "jx: invalid escape in a string of the filter";
+            return -1;
+        }
+        if i > rs { jj.f.lits += substr(f, rs, i - rs); }
+        let cp = escape_cp(f, i);
+        if cp == 0 { jj.f.lits += "\0"; } else { jj.f.lits += chr(cp); }
+        i += jj.sc.esc;
+        rs = i;
+    }
+    if i > rs { jj.f.lits += substr(f, rs, i - rs); }
+    return i;
+}
+
+// a string literal of the filter at q, with interpolations `\(expr)`: the pieces and the `tostring` of each expression added up, left to right
+fn parse_string(f: text, q: i64, fmt: i64) -> i64 {
+    var i = q + 1;
+    var acc = -1;
+    while true {
+        let lo = len(jj.f.lits);
+        let stop = string_piece(f, i);
+        if stop < 0 { return -1; }
+        let n = len(jj.f.lits) - lo;
+        let c = byte_at(f, stop);
+        if n > 0 || (c == 34 && acc < 0) {
+            let h = new_const(5, 1, lo, n);
+            if h < 0 { return -1; }
+            let ln = mk(K.LIT, h, 0, 0, q);
+            if ln < 0 { return -1; }
+            if acc < 0 { acc = ln; } else { acc = mk(K.BIN, acc, ln, 21, q); }
+            if acc < 0 { return -1; }
+        }
+        if c == 34 { jj.cp = stop + 1; return acc; }
+        jj.cp = stop + 2;
+        let e = parse_expr(f, 1);
+        if e < 0 { return -1; }
+        let q2 = skip_ws(f, jj.cp);
+        if byte_at(f, q2) != 41 { syntax("expected ) after the expression in a string", q2); return -1; }
+        var ts = -1;
+        if fmt == 0 { ts = mk(K.FN, -1, -1, F.TOSTRING, q); } else { ts = mk(K.FN, -1, -1, fmt, q); }
+        if ts < 0 { return -1; }
+        let en = mk_pipe(e, ts, q);
+        if en < 0 { return -1; }
+        if acc < 0 { acc = en; } else { acc = mk(K.BIN, acc, en, 21, q); }
+        if acc < 0 { return -1; }
+        i = q2 + 1;
+    }
+    return -1;
+}
+
 // a constant value entry
 fn new_const(tag: i64, vs: i64, a: i64, b: i64) -> i64 {
     let h = jj.v.ncon;
@@ -887,6 +975,7 @@ fn parse_pat(f: text, t: i64, depth: i64) -> bool {
     if depth >= 8 { rej1("a pattern nested more than 8 levels", jj.cp); return false; }
     var q = skip_ws(f, jj.cp);
     let c = byte_at(f, q);
+    if depth >= 1 && (c == 91 || c == 123) { jj.pat_nest = true; }
     if c == 36 {
         var e = q + 1;
         while is_name_char(byte_at(f, e)) { e += 1; }
@@ -969,6 +1058,85 @@ fn alt_pattern(f: text, q: i64) -> bool {
     return byte_at(f, q) == 63 && byte_at(f, q + 1) == 47 && byte_at(f, q + 2) == 47;
 }
 
+// the name of scope entry i equals the name of entry k
+fn same_var_name(i: i64, k: i64) -> bool {
+    if jj.f.vname_len[i] != jj.f.vname_len[k] { return false; }
+    return substr(jj.f.keys, jj.f.vname_off[i], jj.f.vname_len[i]) == substr(jj.f.keys, jj.f.vname_off[k], jj.f.vname_len[k]);
+}
+
+// `E as P1 ?// P2 ?// P3 | body` (npat patterns, parsed already: their names are the scope entries alt_s/alt_e, their bindings pbslot/pbnode alt_b/alt_be):
+// the body is parsed again for each alternative, with every name of any pattern a variable (null when the pattern does not bind it), and the
+// alternatives are nested `try`s: an error in the destructuring or in the body of one alternative continues with the next, on the same value and input
+fn parse_alternatives(f: text, lhs: i64, t: i64, npat: i64, q0: i64) -> i64 {
+    let top = jj.f.nvar;
+    let body_start = jj.cp;
+    if jj.f.nvars >= 60 { jj.err = "jx: too many variables in the filter"; return -1; }
+    let tin = jj.f.nvars;
+    jj.f.nvars += 1;
+    var chain = -1;
+    var i = npat - 1;
+    while i >= 0 {
+        jj.f.nvar = top;
+        // the names of pattern i
+        var m = jj.alt_s[i];
+        while m < jj.alt_e[i] {
+            if jj.f.nvar >= 63 { jj.err = "jx: too many variables in the filter"; return -1; }
+            jj.f.vname_off[jj.f.nvar] = jj.f.vname_off[m];
+            jj.f.vname_len[jj.f.nvar] = jj.f.vname_len[m];
+            jj.f.vslot[jj.f.nvar] = jj.f.vslot[m];
+            jj.f.nvar += 1;
+            m += 1;
+        }
+        // the names of the other patterns, null here
+        let nulls_lo = jj.f.nvar;
+        var k = 0;
+        while k < npat {
+            if k != i {
+                var e = jj.alt_s[k];
+                while e < jj.alt_e[k] {
+                    var known = false;
+                    var c = top;
+                    while c < jj.f.nvar { if same_var_name(c, e) { known = true; } c += 1; }
+                    if !known {
+                        if jj.f.nvar >= 63 || jj.f.nvars >= 60 { jj.err = "jx: too many variables in the filter"; return -1; }
+                        jj.f.vname_off[jj.f.nvar] = jj.f.vname_off[e];
+                        jj.f.vname_len[jj.f.nvar] = jj.f.vname_len[e];
+                        jj.f.vslot[jj.f.nvar] = jj.f.nvars;
+                        jj.f.nvars += 1;
+                        jj.f.nvar += 1;
+                    }
+                    e += 1;
+                }
+            }
+            k += 1;
+        }
+        jj.cp = body_start;
+        var body = parse_expr(f, 1);
+        if body < 0 { return -1; }
+        body = wrap_bindings(body, jj.alt_b[i], jj.alt_be[i], q0);
+        if body < 0 { return -1; }
+        var c2 = jj.f.nvar - 1;
+        while c2 >= nulls_lo {
+            body = mk(K.AS, mk(K.LIT, jj.ev.hnull, 0, 0, q0), body, jj.f.vslot[c2], q0);
+            if body < 0 { return -1; }
+            c2 -= 1;
+        }
+        if chain < 0 { chain = body; }
+        else {
+            let handler = mk_pipe(mk(K.VAR, 0, 0, tin, q0), chain, q0);
+            if handler < 0 { return -1; }
+            chain = mk(K.TRY, body, handler, 0, q0);
+            if chain < 0 { return -1; }
+        }
+        i -= 1;
+    }
+    jj.f.nvar = top;
+    // `. as $in | chain`: the input of the body, for the next alternative
+    let cc = mk(K.AS, mk(K.ID, 0, 0, 0, q0), chain, tin, q0);
+    if cc < 0 { return -1; }
+    return mk(K.AS, lhs, cc, t, q0);
+}
+
 // `E as [$a, {b: $c}] | body`: the pattern is parsed after `as` (jj.cp at it); returns the AS node
 fn parse_as_pattern(f: text, lhs: i64, q0: i64) -> i64 {
     if jj.f.nvars >= 60 { jj.err = "jx: too many variables in the filter"; return -1; }
@@ -976,16 +1144,45 @@ fn parse_as_pattern(f: text, lhs: i64, q0: i64) -> i64 {
     jj.f.nvars += 1;
     let save = jj.f.nvar;
     let lo = jj.pbn;
-    if !parse_pat(f, t, 0) { return -1; }
-    let hi = jj.pbn;
-    let q2 = skip_ws(f, jj.cp);
-    if alt_pattern(f, q2) { return rej1("destructuring alternatives `?//`", q2); }
+    var npat = 0;
+    var q2 = 0;
+    jj.pat_nest = false;
+    while true {
+        if npat >= 8 { return rej1("more than 8 destructuring alternatives", jj.cp); }
+        jj.alt_s[npat] = jj.f.nvar;
+        jj.alt_b[npat] = jj.pbn;
+        jj.alt_k[npat] = byte_at(f, skip_ws(f, jj.cp));
+        if !parse_pat(f, t, 0) { return -1; }
+        jj.alt_e[npat] = jj.f.nvar;
+        jj.alt_be[npat] = jj.pbn;
+        npat += 1;
+        q2 = skip_ws(f, jj.cp);
+        if alt_pattern(f, q2) { jj.cp = q2 + 3; continue; }
+        break;
+    }
     if byte_at(f, q2) != 124 { return syn1("expected `|` after the pattern", q2); }
     jj.cp = q2 + 1;
+    if npat > 1 {
+        if jj.noas != 0 { return rej1("destructuring alternatives `?//` here", q2); }
+        // alternatives that read keys and indexes of the same value are not exact in the streaming engine (README, known issues)
+        var ia = 0;
+        var has_arr = false;
+        var has_obj = false;
+        while ia < npat {
+            if jj.alt_k[ia] == 91 { has_arr = true; }
+            if jj.alt_k[ia] == 123 { has_obj = true; }
+            ia += 1;
+        }
+        if (has_arr && has_obj) || jj.pat_nest { return rej1("destructuring alternatives `?//` that mix array and object patterns or nest patterns", q2); }
+        let r = parse_alternatives(f, lhs, t, npat, q0);
+        jj.f.nvar = save;
+        jj.pbn = lo;
+        return r;
+    }
     var body = parse_expr(f, 1);
     jj.f.nvar = save;
     if body < 0 { return -1; }
-    body = wrap_bindings(body, lo, hi, q0);
+    body = wrap_bindings(body, lo, jj.pbn, q0);
     jj.pbn = lo;
     if body < 0 { return -1; }
     return mk(K.AS, lhs, body, t, q0);
@@ -1093,6 +1290,10 @@ fn native_id(w: text) -> i64 {
     if w == "utf8bytelength" { return 28; }
     if w == "keys_unsorted" { return 29; }
     if w == "from_entries" { return 34; }
+    if w == "explode" { return 42; }
+    if w == "implode" { return 43; }
+    if w == "fromjson" { return 44; }
+    if w == "indices" { return 120; }
     if w == "trim" { return 30; }
     if w == "ltrim" { return 31; }
     if w == "rtrim" { return 32; }
@@ -1166,15 +1367,8 @@ fn parse_primary(f: text) -> i64 {
         if h < 0 { return -1; }
         return mk(K.LIT, h, 0, 0, q);
     }
-    if c == 34 {
-        let lo = len(jj.f.lits);
-        let e = filter_string(f, q, false);
-        if e < 0 { return -1; }
-        jj.cp = e;
-        let h = new_const(5, 1, lo, len(jj.f.lits) - lo);
-        if h < 0 { return -1; }
-        return mk(K.LIT, h, 0, 0, q);
-    }
+    if c == 34 { return parse_string(f, q, 0); }
+    if c == 64 { return parse_format(f, q); }
     if c == 40 {
         jj.cp = q + 1;
         let e = parse_expr(f, 1);
@@ -1493,6 +1687,7 @@ fn parse_expr(f: text, minp: i64) -> i64 {
             let lo = len(jj.f.keys);
             jj.f.keys += substr(f, ns, e - ns);
             let q2 = skip_ws(f, e);
+            if alt_pattern(f, q2) { jj.cp = skip_ws(f, q + 2); jj.pdepth -= 1; return parse_as_pattern(f, lhs, q); }
             if byte_at(f, q2) != 124 { jj.pdepth -= 1; return syn1("expected `|` after the variable", q2); }
             jj.cp = q2 + 1;
             let save = jj.f.nvar;
@@ -2229,9 +2424,12 @@ fn compile(f: text) -> i64 {
     jj.pre += prelude_text();
     if load_prelude() != 0 { return 1; }
     jj.cur_src = 0;
+    if bind_cli_args() < 0 { if len(jj.err) == 0 { jj.err = "jx: internal error binding the arguments"; } return 1; }
     jj.cp = skip_ws(f, 0);
     if jj.cp >= len(f) { return reject("an empty filter", 0); }
-    let root = parse_expr(f, 1);
+    var root = parse_expr(f, 1);
+    if root < 0 { return 1; }
+    root = wrap_cli_args(root);
     if root < 0 { return 1; }
     let q = skip_ws(f, jj.cp);
     if byte_at(f, q) >= 0 { return syntax("unexpected `" + substr(f, q, 1) + "`", q); }
@@ -2273,6 +2471,113 @@ fn compile(f: text) -> i64 {
     return 0;
 }
 
+// ---- --arg, --argjson, --args and --jsonargs: variables bound around the whole filter ----
+
+// the argument range as a JSON string, appended to lits
+fn lits_quote(o: i64, l: i64) {
+    jj.f.lits += chr(34);
+    var rs = o;
+    var i = o;
+    while i < o + l {
+        let c = byte_at(jj.argtxt, i);
+        if c == 34 || c == 92 || c < 32 {
+            if i > rs { jj.f.lits += substr(jj.argtxt, rs, i - rs); }
+            if c == 34 { jj.f.lits += chr(92) + chr(34); }
+            else if c == 92 { jj.f.lits += chr(92) + chr(92); }
+            else { jj.f.lits += chr(92) + "u00" + substr("0123456789abcdef", c / 16, 1) + substr("0123456789abcdef", c % 16, 1); }
+            rs = i + 1;
+        }
+        i += 1;
+    }
+    if o + l > rs { jj.f.lits += substr(jj.argtxt, rs, o + l - rs); }
+    jj.f.lits += chr(34);
+}
+
+// a node with the text of lits [lo, now) as a string constant, parsed as JSON when json
+fn arg_node(lo: i64, json: bool) -> i64 {
+    let h = new_const(5, 1, lo, len(jj.f.lits) - lo);
+    if h < 0 { return -1; }
+    var nd = mk(K.LIT, h, 0, 0, 0);
+    if nd < 0 { return -1; }
+    if json {
+        let fj = mk(K.FN, -1, -1, 44, 0);
+        if fj < 0 { return -1; }
+        nd = mk_pipe(nd, fj, 0);
+    }
+    return nd;
+}
+
+fn bind_var(nd: i64, name_o: i64, name_l: i64, k: i64) -> i64 {
+    if nd < 0 { return -1; }
+    if jj.f.nvars >= 58 || jj.f.nvar >= 60 { jj.err = "jx: too many variables in the filter"; return -1; }
+    let slot = jj.f.nvars;
+    jj.f.nvars += 1;
+    let lo = len(jj.f.keys);
+    jj.f.keys += substr(jj.argtxt, name_o, name_l);
+    jj.f.vname_off[jj.f.nvar] = lo;
+    jj.f.vname_len[jj.f.nvar] = name_l;
+    jj.f.vslot[jj.f.nvar] = slot;
+    jj.f.nvar += 1;
+    jj.nm_slot[k] = slot;
+    jj.nm_node[k] = nd;
+    return 0;
+}
+
+fn mentions_args() -> bool {
+    var i = 0;
+    let n = len(jj.ftxt);
+    while i + 5 <= n {
+        if byte_at(jj.ftxt, i) == 36 && byte_at(jj.ftxt, i + 1) == 65 && byte_at(jj.ftxt, i + 2) == 82 && byte_at(jj.ftxt, i + 3) == 71 && byte_at(jj.ftxt, i + 4) == 83 { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn bind_cli_args() -> i64 {
+    var k = 0;
+    while k < jj.nnamed {
+        let lo = len(jj.f.lits);
+        jj.f.lits += substr(jj.argtxt, jj.nm_vo[k], jj.nm_vl[k]);
+        if bind_var(arg_node(lo, jj.nm_kind[k] == 1), jj.nm_no[k], jj.nm_nl[k], k) < 0 { return -1; }
+        k += 1;
+    }
+    // $ARGS: {"positional": [...], "named": {...}}, only when the filter mentions it
+    jj.nm_slot[jj.nnamed] = -1;
+    if !mentions_args() { return 0; }
+    let lo = len(jj.f.lits);
+    jj.f.lits += "{" + chr(34) + "positional" + chr(34) + ":[";
+    var i = 0;
+    while i < jj.npos {
+        if i > 0 { jj.f.lits += ","; }
+        if jj.ps_kind[i] == 1 { jj.f.lits += substr(jj.argtxt, jj.ps_o[i], jj.ps_l[i]); } else { lits_quote(jj.ps_o[i], jj.ps_l[i]); }
+        i += 1;
+    }
+    jj.f.lits += "]," + chr(34) + "named" + chr(34) + ":{";
+    i = 0;
+    while i < jj.nnamed {
+        if i > 0 { jj.f.lits += ","; }
+        lits_quote(jj.nm_no[i], jj.nm_nl[i]);
+        jj.f.lits += ":";
+        if jj.nm_kind[i] == 1 { jj.f.lits += substr(jj.argtxt, jj.nm_vo[i], jj.nm_vl[i]); } else { lits_quote(jj.nm_vo[i], jj.nm_vl[i]); }
+        i += 1;
+    }
+    jj.f.lits += "}}";
+    let an0 = len(jj.argtxt);
+    jj.argtxt += "ARGS";
+    if bind_var(arg_node(lo, true), an0, 4, jj.nnamed) < 0 { return -1; }
+    return 0;
+}
+
+fn wrap_cli_args(root: i64) -> i64 {
+    var r = root;
+    var k = jj.nnamed;
+    while k >= 0 && r >= 0 {
+        if jj.nm_slot[k] >= 0 { r = mk(K.AS, jj.nm_node[k], r, jj.nm_slot[k], 0); }
+        k -= 1;
+    }
+    return r;
+}
+
 // the builtins written in jq (each is parsed again at every call, with the arguments as closures)
 fn prelude_text() -> text {
     return "def in(xs): . as $x | xs | has($x);" 
@@ -2288,6 +2593,8 @@ fn prelude_text() -> text {
         + "def to_entries: [keys_unsorted[] as $k | {key: $k, value: .[$k]}];" 
         + "def with_entries(f): to_entries | map(f) | from_entries;" 
         + "def map_values(f): if type == \"object\" then [to_entries[] | {key: .key, value: (.value | first(f))}] | from_entries else [.[] | first(f)] end;" 
+        + "def index($i): indices($i) | .[0];" 
+        + "def rindex($i): indices($i) | .[-1:][0];" 
         + "def sort_by(f): _sort_by_impl(map([f]));" 
         + "def group_by(f): _group_by_impl(map([f]));" 
         + "def unique_by(f): _unique_by_impl(map([f]));" 

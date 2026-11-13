@@ -147,6 +147,10 @@ struct Out {
     raw: bool;
     to: i64;                      // 0 write to `text`, 1 write to the scratch string (tostring)
     results: i64;
+    ind: i64;                     // spaces per indent level (--indent), 2 by default
+    tab: bool;                    // --tab
+    nonl: bool;                   // -j: no newline after a result
+    lastpos: i64;                 // where the last result starts in text (-e)
 }
 
 // two numbers being compared, as decimals
@@ -217,6 +221,8 @@ struct Ev {
     hfalse: i64;
     htype: i64[8];                // the names of the types as constants
     harr0: i64;                   // an empty array
+    fjv: i64;                     // fromjson: the string just parsed
+    fjb: i64;                     // fromjson: where its text starts in the scratch string
     nanv: f64;
     emsg: utf8<300>;
     rawmsg: utf8<300>;
@@ -242,6 +248,22 @@ struct J {
     exitc: i64;                   // the exit code of the error being reported: 1 not supported or a limit, 2 usage, 3 syntax, 5 invalid input or a runtime error
     fs: i64;                      // the filter in the arguments
     fe: i64;
+    argtxt: utf8<1048576>;        // the arguments (every one followed by a 0 byte), for --arg and the like at compile time
+    nullin: bool;                 // -n: the input is null, standard input is not read
+    estatus: bool;                // -e: the exit code follows the last output
+    nnamed: i64;                  // --arg and --argjson: kind 0 string, 1 JSON; the name and the value as ranges of argtxt
+    nm_kind: i64[32];
+    nm_no: i64[32];
+    nm_nl: i64[32];
+    nm_vo: i64[32];
+    nm_vl: i64[32];
+    nm_slot: i64[34];
+    nm_node: i64[34];
+    npos: i64;                    // --args and --jsonargs: the positional values (kind 0 string, 1 JSON)
+    ps_kind: i64[32];
+    ps_o: i64[32];
+    ps_l: i64[32];
+    posmode: i64;                 // 0 files, 1 --args, 2 --jsonargs
     dump: bool;                   // --dump-program: print the bytecode and stop
     wv_used: i64;
     wv_bound: i64;
@@ -258,6 +280,12 @@ struct J {
     pstk: i64[10];                // compile: the path of steps of the pattern leaf being parsed: 0 index, 1 key
     pstb: i64[10];
     pstc: i64[10];
+    alt_s: i64[8];                // compile: `?//` alternatives: the variable names of each pattern (a range of the scope stack) and its bindings (a range of pbslot)
+    alt_e: i64[8];
+    alt_b: i64[8];
+    alt_be: i64[8];
+    alt_k: i64[8];                // compile: the first byte of each alternative pattern
+    pat_nest: bool;               // compile: a pattern has a container inside a container
     pa: i64[4];
 }
 state jj: J;
@@ -284,20 +312,74 @@ fn usage_error(args: text, s: i64, e: i64, supported_name: bool) -> i64 {
 
 // a jq long option that jx does not have yet
 fn known_long(args: text, s: i64, e: i64) -> bool {
-    if arg_is(args, s, e, "--tab") || arg_is(args, s, e, "--indent") || arg_is(args, s, e, "--arg") || arg_is(args, s, e, "--argjson") { return true; }
-    if arg_is(args, s, e, "--args") || arg_is(args, s, e, "--jsonargs") || arg_is(args, s, e, "--slurp") || arg_is(args, s, e, "--stream") { return true; }
+    if arg_is(args, s, e, "--slurp") || arg_is(args, s, e, "--stream") { return true; }
     if arg_is(args, s, e, "--stream-errors") || arg_is(args, s, e, "--seq") || arg_is(args, s, e, "--slurpfile") || arg_is(args, s, e, "--rawfile") { return true; }
-    if arg_is(args, s, e, "--sort-keys") || arg_is(args, s, e, "--color-output") || arg_is(args, s, e, "--monochrome-output") { return true; }
-    if arg_is(args, s, e, "--ascii-output") || arg_is(args, s, e, "--join-output") || arg_is(args, s, e, "--raw-output0") || arg_is(args, s, e, "--null-input") { return true; }
-    if arg_is(args, s, e, "--raw-input") || arg_is(args, s, e, "--exit-status") || arg_is(args, s, e, "--from-file") || arg_is(args, s, e, "--library-path") { return true; }
-    if arg_is(args, s, e, "--binary") || arg_is(args, s, e, "--unbuffered") || arg_is(args, s, e, "--help") || arg_is(args, s, e, "--version") { return true; }
+    if arg_is(args, s, e, "--sort-keys") || arg_is(args, s, e, "--color-output") { return true; }
+    if arg_is(args, s, e, "--ascii-output") || arg_is(args, s, e, "--raw-output0") { return true; }
+    if arg_is(args, s, e, "--raw-input") || arg_is(args, s, e, "--from-file") || arg_is(args, s, e, "--library-path") { return true; }
+    if arg_is(args, s, e, "--binary") || arg_is(args, s, e, "--help") || arg_is(args, s, e, "--version") { return true; }
     if arg_is(args, s, e, "--build-configuration") || arg_is(args, s, e, "--strict") || arg_is(args, s, e, "--explain") { return true; }
     return false;
 }
 
 // a short option letter of jq that jx does not have yet
 fn known_short(c: i64) -> bool {
-    return c == 97 || c == 106 || c == 115 || c == 110 || c == 101 || c == 83 || c == 67 || c == 77 || c == 102 || c == 76 || c == 82 || c == 104 || c == 86 || c == 98;
+    return c == 97 || c == 115 || c == 83 || c == 67 || c == 102 || c == 76 || c == 82 || c == 104 || c == 86 || c == 98 || c == 48;
+}
+
+// the end of the argument that starts at s (its 0 byte), or n
+fn arg_end(args: text, s: i64) -> i64 {
+    var e = s;
+    let n = len(args);
+    while e < n && byte_at(args, e) != 0 { e += 1; }
+    return e;
+}
+
+fn usage(msg: text) -> i64 {
+    jj.exitc = 2;
+    jj.err = "jx: " + msg;
+    return 2;
+}
+
+fn is_number_arg(args: text, s: i64, e: i64) -> bool {
+    if e == s { return false; }
+    var i = s;
+    while i < e {
+        let c = byte_at(args, i);
+        if c < 48 || c > 57 { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// a long option that takes parameters: --indent n, --arg name value, --argjson name json; the position after them, or -1 with the error set (jj.err)
+fn take_params(args: text, s: i64, e: i64) -> i64 {
+    let n = len(args);
+    if arg_is(args, s, e, "--indent") {
+        if e + 1 >= n { usage("--indent takes one parameter"); return -1; }
+        let e2 = arg_end(args, e + 1);
+        if !is_number_arg(args, e + 1, e2) { usage("--indent takes a number"); return -1; }
+        if e2 - e - 1 != 1 || byte_at(args, e + 1) > 55 { usage("Cannot indent more than 7 characters"); return -1; }
+        jj.o.ind = byte_at(args, e + 1) - 48;
+        jj.o.tab = false;
+        jj.o.pretty = true;
+        return e2 + 1;
+    }
+    // --arg and --argjson
+    if e + 1 >= n { usage(substr(args, s, e - s) + " takes two parameters (e.g. " + substr(args, s, e - s) + " varname value)"); return -1; }
+    let e2 = arg_end(args, e + 1);
+    if e2 + 1 >= n { usage(substr(args, s, e - s) + " takes two parameters (e.g. " + substr(args, s, e - s) + " varname value)"); return -1; }
+    let e3 = arg_end(args, e2 + 1);
+    if jj.nnamed >= 32 { usage("too many --arg and --argjson options (32 at most)"); return -1; }
+    let k = jj.nnamed;
+    jj.nm_kind[k] = 0;
+    if arg_is(args, s, e, "--argjson") { jj.nm_kind[k] = 1; }
+    jj.nm_no[k] = e + 1;
+    jj.nm_nl[k] = e2 - e - 1;
+    jj.nm_vo[k] = e2 + 1;
+    jj.nm_vl[k] = e3 - e2 - 1;
+    jj.nnamed += 1;
+    return e3 + 1;
 }
 
 // the arguments: sets jj.o.pretty, jj.o.raw, jj.sc.validate, the filter at [jj.fs, jj.fe) of args; 0, or 2 with the message in jj.err
@@ -307,6 +389,7 @@ fn parse_opts(args: text) -> i64 {
     jj.sc.validate = false;
     jj.fs = -1;
     jj.fe = -1;
+    jj.o.ind = 2;
     var s = 0;
     var only_positional = false;
     let n = len(args);
@@ -325,6 +408,19 @@ fn parse_opts(args: text) -> i64 {
                 else if arg_is(args, s, e, "--raw-output") { jj.o.raw = true; }
                 else if arg_is(args, s, e, "--validate") { jj.sc.validate = true; }
                 else if arg_is(args, s, e, "--dump-program") { jj.dump = true; }
+                else if arg_is(args, s, e, "--null-input") { jj.nullin = true; }
+                else if arg_is(args, s, e, "--exit-status") { jj.estatus = true; }
+                else if arg_is(args, s, e, "--join-output") { jj.o.raw = true; jj.o.nonl = true; }
+                else if arg_is(args, s, e, "--monochrome-output") || arg_is(args, s, e, "--unbuffered") { jj.o.tab = jj.o.tab; }
+                else if arg_is(args, s, e, "--tab") { jj.o.tab = true; jj.o.pretty = true; }
+                else if arg_is(args, s, e, "--args") { jj.posmode = 1; }
+                else if arg_is(args, s, e, "--jsonargs") { jj.posmode = 2; }
+                else if arg_is(args, s, e, "--indent") || arg_is(args, s, e, "--arg") || arg_is(args, s, e, "--argjson") {
+                    let nx = take_params(args, s, e);
+                    if nx < 0 { return 2; }
+                    s = nx;
+                    continue;
+                }
                 else if known_long(args, s, e) { return usage_error(args, s, e, true); }
                 else {
                     // an `--name=value` form of a known option
@@ -340,6 +436,10 @@ fn parse_opts(args: text) -> i64 {
                     let c = byte_at(args, k);
                     if c == 99 { jj.o.pretty = false; }
                     else if c == 114 { jj.o.raw = true; }
+                    else if c == 110 { jj.nullin = true; }
+                    else if c == 101 { jj.estatus = true; }
+                    else if c == 106 { jj.o.raw = true; jj.o.nonl = true; }
+                    else if c == 77 { jj.o.tab = jj.o.tab; }
                     else {
                         jj.exitc = 2;
                         let one = "-" + substr(args, k, 1);
@@ -353,6 +453,12 @@ fn parse_opts(args: text) -> i64 {
         } else if jj.fs < 0 {
             jj.fs = s;
             jj.fe = e;
+        } else if jj.posmode != 0 {
+            if jj.npos >= 32 { return usage("too many positional arguments (32 at most)"); }
+            jj.ps_kind[jj.npos] = jj.posmode - 1;
+            jj.ps_o[jj.npos] = s;
+            jj.ps_l[jj.npos] = e - s;
+            jj.npos += 1;
         } else {
             jj.exitc = 2;
             jj.err = "jx: input files are not supported yet (jx reads standard input): '" + substr(args, s, e - s) + "'";
@@ -367,13 +473,32 @@ fn parse_opts(args: text) -> i64 {
 @main
 fn main(args: utf8<0..1048576> from args, doc: utf8<4294967295> from stdin) -> Response<text> {
     jj.exitc = 1;
+    jj.argtxt = args;
     var rc = parse_opts(args);
     if rc == 0 {
-        if jj.fs < 0 { rc = go(".", doc); }
-        else { rc = go(substr(args, jj.fs, jj.fe - jj.fs), doc); }
+        if jj.nullin {
+            if jj.fs < 0 { rc = go(".", "null"); }
+            else { rc = go(substr(args, jj.fs, jj.fe - jj.fs), "null"); }
+        } else {
+            if jj.fs < 0 { rc = go(".", doc); }
+            else { rc = go(substr(args, jj.fs, jj.fe - jj.fs), doc); }
+        }
     }
     if rc == 0 {
-        if jj.o.results > 0 { jj.o.text += "\n"; }
+        var code = 0;
+        if jj.estatus && !jj.dump {
+            if jj.o.results == 0 { code = 4; }
+            else {
+                let last = substr(jj.o.text, jj.o.lastpos, len(jj.o.text) - jj.o.lastpos);
+                if last == "null" || last == "false" {
+                    code = 1;
+                    if jj.o.raw { return exit_error(5, "jx: error: with -e and raw output the last result null or false cannot be told from the string\n"); }
+                }
+            }
+        }
+        if jj.o.results > 0 && !jj.o.nonl { jj.o.text += "\n"; }
+        if code == 1 { return exit(1, jj.o.text); }
+        if code == 4 { return exit(4, jj.o.text); }
         return ok(jj.o.text);
     }
     if jj.exitc == 2 { return exit_error(2, jj.err + "\n"); }

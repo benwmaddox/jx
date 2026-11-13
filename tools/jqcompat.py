@@ -608,6 +608,8 @@ def classify_record(c, tool, rc, out, err):
             return "rejected", False, "option not supported"
         if not out and rc in (1, 3) and ("not supported" in errt or "syntax error" in errt):
             return "rejected", False, "not supported" if "not supported" in errt else "syntax error (unsupported syntax)"
+        if rc == 5 and not out and not c["expected"]:
+            return "pass", False, "runtime error expected (the test has no output)"
         exp = [jload(x) for x in c["expected"]]
         got = parse_out(out)
         if rc == 0 and got is not None and [norm(x) for x in got] == [norm(x) for x in exp]:

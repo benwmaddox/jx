@@ -25,10 +25,10 @@ A case can carry several tags, so rows overlap. `core` matches every case. Colum
 | comma-alt | 187 | 138 | 20 | 21 | 8 | B | 2 | Stage 2 (proposal) | `,` as union of slots, filter-order output |
 | limit-first | 90 | 42 | 15 | 7 | 26 | B | 2 | Stage 2 (proposal) | limit/first/last/nth/until/isempty/range/error/empty: generator loop and early exit |
 | vars | 93 | 51 | 5 | 24 | 13 | B | 2 | Stage 2 (proposal) | `E as $v` aliases a slot/register |
-| string-fns | 55 | 22 | 14 | 12 | 7 | B | 5 | Later (proposal) | string functions on a captured string, results in scratch (about 2 days for the common ones) |
+| string-fns | 55 | 22 | 14 | 12 | 7 | B | 5 | Done (Stage 3): indices/index/rindex, explode/implode, fromjson (strict JSON), ltrimstr/rtrimstr/trimstr, split/1, trim; regex functions skipped by the owner | string functions on a captured string, results in scratch (about 2 days for the common ones) |
 | collectors | 80 | 55 | 3 | 12 | 10 | B | 3 | Done (Stage 3) | sort/group/unique/min/max/flatten: collector memory linear in count (about 3 days) |
 | paths | 34 | 11 | 18 | 0 | 5 | C | 6 | Skip (proposal) | owner decision: path/paths/getpath/setpath/delpaths/del/pick need positions and whole subtrees |
-| destructure | 33 | 12 | 3 | 18 | 0 | B | 3 | Done (Stage 3) | patterns bind constant index/key paths; `?//` alternatives need backtracking (about 2 days) |
+| destructure | 33 | 12 | 3 | 18 | 0 | B | 3 | Done (Stage 3): patterns and `?//` (nested try alternatives); `?//` mixing array and object patterns is rejected (engine known issue, README) | patterns bind constant index/key paths |
 | dynamic-index | 25 | 5 | 5 | 1 | 14 | C | 6 | Open (proposal) | .[$k], .[expr], has($k), in(): bounded re-scan of a captured node; static after inlining is free (about 2-3 days) |
 | keys-has | 58 | 40 | 8 | 6 | 4 | B | 2 | Stage 2 (proposal) | keys/type/length/map/select helpers on spans (types and counts) |
 | assign | 42 | 25 | 11 | 0 | 6 | C | 6 | Open (proposal) | `\|=`, `=`, `+=` need paths of the update target; static paths could be done at compile time (about 3-5 days), computed ones need a tree |
@@ -40,12 +40,12 @@ A case can carry several tags, so rows overlap. `core` matches every case. Colum
 | dates | 14 | 7 | 5 | 0 | 2 | D | 6 | Open (proposal) | pure functions but needs a calendar/strptime implementation (about 2-4 days); rarely needed for log filtering |
 | loc | 2 | 0 | 0 | 2 | 0 | D | 6 | Skip (proposal) | $__loc__ needs source positions; design lists it as low value |
 | funcdef | 17 | 15 | 1 | 1 | 0 | B | 3 | Done (Stage 3) | non-recursive defs are inlined; closures inlined as fragments (about 3 days); design gives no stage |
-| interpolation | 11 | 9 | 0 | 2 | 0 | B | 5 | Later (proposal) | "a \(.x)" assembled in scratch; design stage 5 (about 1 day after tostring) |
+| interpolation | 11 | 9 | 0 | 2 | 0 | B | 5 | Done (Stage 3) | "a \(.x)" assembled in scratch; design stage 5 (about 1 day after tostring) |
 | input-inputs | 2 | 1 | 1 | 0 | 0 | D | 4 | Later (proposal) | input/inputs/debug/stderr: next document is a new scan; cheap in the driver (about 1 day), design stage 4 |
 | walk | 4 | 3 | 0 | 1 | 0 | C | 6 | Skip (proposal) | owner decision: needs a rebuilt tree of the node |
 | entries | 3 | 2 | 1 | 0 | 0 | B | 3 | Done (Stage 3): to_entries, from_entries (native, jq 1.8.2 key/value variants), with_entries, map_values (nested map_values deeper than the parse limit is rejected) | to_entries/from_entries/with_entries: key/value span pairs, design stage 3 |
 | env | 0 | 0 | 0 | 0 | 0 | D | 3 | Stage 3 (proposal) | $ENV/env is a compile-time constant; under 1 hour |
-| formats | 7 | 7 | 0 | 0 | 0 | D | 5 | Later (proposal) | @csv/@tsv/@sh/@uri/@html/@base64 are output-side transforms on strings; cheap (about 1 day total) |
+| formats | 7 | 7 | 0 | 0 | 0 | D | 5 | Done (Stage 3): @text @json @csv @tsv @html @uri @sh @base64 @base64d, @fmt "..." | @csv/@tsv/@sh/@uri/@html/@base64 are output-side transforms on strings; cheap (about 1 day total) |
 | regex | 0 | 0 | 0 | 0 | 0 | B | 6 | Skip (proposal) | owner decision: regex skipped (needs an engine; Oniguruma semantics) |
 | tostream | 0 | 0 | 0 | 0 | 0 | C | 6 | Skip (proposal) | owner decision: tostream/fromstream/truncate_stream need a path stack and --stream style events |
 | recurse-dotdot | 3 | 3 | 0 | 0 | 0 | C | 6 | Open (proposal) | `..`/recurse/while/repeat: All-children demand and recursion; cheapest is `..` on a captured node (about 3 days) |

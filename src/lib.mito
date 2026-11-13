@@ -592,7 +592,612 @@ fn from_entries_of(doc: text, filter: text, v: i64) -> i64 {
     return r;
 }
 
+// ---- formats: @csv @tsv @html @uri @sh @base64 @base64d (the result is built in jj.ev.tmp3, then copied to a string) ----
+
+fn fmt_room(n: i64) -> bool {
+    if len(jj.ev.tmp3) + n * 6 + 64 > 1000000 { jqerr("the result of a format is too long (over 1 MB)"); return false; }
+    return true;
+}
+
+// the plain bytes of string h, escaped for csv (mode 0), tsv (1), html (2), sh (3) or uri (4), appended to the builder
+fn fmt_escape(doc: text, h: i64, mode: i64) -> bool {
+    let n = str_plain(doc, h, 0);
+    if !fmt_room(n) { return false; }
+    let hexd = "0123456789ABCDEF";
+    var rs = 0;
+    var i = 0;
+    while i < n {
+        let b = byte_at(jj.tmp, i);
+        var rep: text<16> = "";
+        var hit = false;
+        if mode == 0 { if b == 34 { rep = chr(34) + chr(34); hit = true; } }
+        else if mode == 1 {
+            if b == 9 { rep = chr(92) + "t"; hit = true; }
+            else if b == 10 { rep = chr(92) + "n"; hit = true; }
+            else if b == 13 { rep = chr(92) + "r"; hit = true; }
+            else if b == 92 { rep = chr(92) + chr(92); hit = true; }
+        }
+        else if mode == 2 {
+            if b == 38 { rep = "&amp;"; hit = true; }
+            else if b == 60 { rep = "&lt;"; hit = true; }
+            else if b == 62 { rep = "&gt;"; hit = true; }
+            else if b == 39 { rep = "&apos;"; hit = true; }
+            else if b == 34 { rep = "&quot;"; hit = true; }
+        }
+        else if mode == 3 { if b == 39 { rep = chr(39) + chr(92) + chr(39) + chr(39); hit = true; } }
+        else {
+            let keep = (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 45 || b == 95 || b == 46 || b == 126;
+            if !keep { rep = "%" + substr(hexd, b / 16, 1) + substr(hexd, b % 16, 1); hit = true; }
+        }
+        if hit {
+            if i > rs { jj.ev.tmp3 += substr(jj.tmp, rs, i - rs); }
+            jj.ev.tmp3 += rep;
+            rs = i + 1;
+        }
+        i += 1;
+    }
+    if n > rs { jj.ev.tmp3 += substr(jj.tmp, rs, n - rs); }
+    return true;
+}
+
+fn built_string() -> i64 {
+    jj.tmp = jj.ev.tmp3;
+    return str_from_tmp();
+}
+
+// @csv and @tsv
+fn fmt_kind(tsv: bool) -> text {
+    if tsv { return "tsv"; }
+    return "csv";
+}
+
+fn csv_of(doc: text, filter: text, v: i64, tsv: bool) -> i64 {
+    let kind = fmt_kind(tsv);
+    if jj.v.vt[v] != 6 { return jqerr(typed(doc, filter, v) + " cannot be " + kind + "-formatted, only array"); }
+    let a = built_of(doc, v);
+    if a < 0 { return -1; }
+    jj.ev.tmp3 = "";
+    var first = true;
+    var p = jj.v.va[a];
+    while p >= 0 {
+        if !first { if tsv { jj.ev.tmp3 += chr(9); } else { jj.ev.tmp3 += ","; } }
+        first = false;
+        let t = jj.v.vt[p];
+        if t == 4 {
+            let x = numd(doc, filter, p);
+            if x == x {
+                let th = tojson_of(doc, filter, p);
+                if th < 0 { return -1; }
+                let n = str_plain(doc, th, 0);
+                if !fmt_room(n) { return -1; }
+                jj.ev.tmp3 += jj.tmp;
+            }
+        }
+        else if t == 3 { jj.ev.tmp3 += "true"; }
+        else if t == 2 { jj.ev.tmp3 += "false"; }
+        else if t == 1 { jj.ev.tmp3 += ""; }
+        else if t == 5 {
+            var mode = 0;
+            if tsv { mode = 1; }
+            if !tsv { jj.ev.tmp3 += chr(34); }
+            if !fmt_escape(doc, p, mode) { return -1; }
+            if !tsv { jj.ev.tmp3 += chr(34); }
+        }
+        else { return jqerr(typed(doc, filter, p) + " is not valid in a " + kind + " row"); }
+        p = jj.v.vn[p];
+    }
+    return built_string();
+}
+
+// @sh: a string quoted for the shell, an array of them separated by spaces
+fn sh_one(doc: text, filter: text, p: i64) -> bool {
+    let t = jj.v.vt[p];
+    if t == 5 {
+        jj.ev.tmp3 += chr(39);
+        if !fmt_escape(doc, p, 3) { return false; }
+        jj.ev.tmp3 += chr(39);
+        return true;
+    }
+    if t == 6 || t == 7 { jqerr(typed(doc, filter, p) + " can not be escaped for shell"); return false; }
+    let th = tojson_of(doc, filter, p);
+    if th < 0 { return false; }
+    let n = str_plain(doc, th, 0);
+    if !fmt_room(n) { return false; }
+    jj.ev.tmp3 += jj.tmp;
+    return true;
+}
+
+fn sh_of(doc: text, filter: text, v: i64) -> i64 {
+    jj.ev.tmp3 = "";
+    if jj.v.vt[v] == 6 {
+        let a = built_of(doc, v);
+        if a < 0 { return -1; }
+        var first = true;
+        var p = jj.v.va[a];
+        while p >= 0 {
+            if !first { jj.ev.tmp3 += " "; }
+            first = false;
+            if !sh_one(doc, filter, p) { return -1; }
+            p = jj.v.vn[p];
+        }
+    } else {
+        if !sh_one(doc, filter, v) { return -1; }
+    }
+    return built_string();
+}
+
+fn base64_of(doc: text, filter: text, v: i64) -> i64 {
+    let sv = tostring_of(doc, filter, v);
+    if sv < 0 { return -1; }
+    let n = str_plain(doc, sv, 0);
+    if !fmt_room(n) { return -1; }
+    let abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    jj.ev.tmp3 = "";
+    var i = 0;
+    while i < n {
+        let b0 = byte_at(jj.tmp, i);
+        var b1 = 0;
+        var b2 = 0;
+        if i + 1 < n { b1 = byte_at(jj.tmp, i + 1); }
+        if i + 2 < n { b2 = byte_at(jj.tmp, i + 2); }
+        let w = b0 * 65536 + b1 * 256 + b2;
+        jj.ev.tmp3 += substr(abc, (w / 262144) % 64, 1);
+        jj.ev.tmp3 += substr(abc, (w / 4096) % 64, 1);
+        if i + 1 < n { jj.ev.tmp3 += substr(abc, (w / 64) % 64, 1); } else { jj.ev.tmp3 += "="; }
+        if i + 2 < n { jj.ev.tmp3 += substr(abc, w % 64, 1); } else { jj.ev.tmp3 += "="; }
+        i += 3;
+    }
+    return built_string();
+}
+
+fn b64_digit(c: i64) -> i64 {
+    if c >= 65 && c <= 90 { return c - 65; }
+    if c >= 97 && c <= 122 { return c - 97 + 26; }
+    if c >= 48 && c <= 57 { return c - 48 + 52; }
+    if c == 43 { return 62; }
+    if c == 47 { return 63; }
+    return -1;
+}
+
+// the decoded bytes in jj.ev.sa[0..m) as a string: an invalid UTF-8 sequence becomes U+FFFD as jq's string builder does it
+fn bytes_string(m: i64) -> i64 {
+    jj.ev.tmp3 = "";
+    var i = 0;
+    while i < m {
+        let b = jj.ev.sa[i];
+        if b < 128 { jj.ev.tmp3 += chr(b); i += 1; continue; }
+        var len = 0;
+        if b >= 194 && b <= 223 { len = 2; } else if b >= 224 && b <= 239 { len = 3; } else if b >= 240 && b <= 244 { len = 4; }
+        if len == 0 { jj.ev.tmp3 += chr(65533); i += 1; continue; }
+        if i + len > m { jj.ev.tmp3 += chr(65533); i = m; continue; }
+        var cp = b & (255 >> (len + 1));
+        var k = 1;
+        var used = len;
+        var bad = false;
+        while k < len {
+            let c = jj.ev.sa[i + k];
+            if (c & 192) != 128 { used = k; bad = true; break; }
+            cp = cp * 64 + (c & 63);
+            k += 1;
+        }
+        if !bad {
+            if (len == 3 && cp < 2048) || (len == 4 && cp < 65536) || cp > 1114111 || (cp >= 55296 && cp <= 57343) { bad = true; }
+        }
+        if bad { jj.ev.tmp3 += chr(65533); } else { jj.ev.tmp3 += chr(cp); }
+        i += used;
+    }
+    return built_string();
+}
+
+fn base64d_of(doc: text, filter: text, v: i64) -> i64 {
+    let sv = tostring_of(doc, filter, v);
+    if sv < 0 { return -1; }
+    let n = str_plain(doc, sv, 0);
+    if n > 700000 { return jqerr("the string is too long for @base64d (over 700000 bytes)"); }
+    var m = 0;
+    var code = 0;
+    var got = 0;
+    var i = 0;
+    while i < n {
+        let c = byte_at(jj.tmp, i);
+        if c == 61 { break; }
+        let d = b64_digit(c);
+        if d < 0 { return jqerr(typed(doc, filter, sv) + " is not valid base64 data"); }
+        code = code * 64 + d;
+        got += 1;
+        if got == 4 {
+            jj.ev.sa[m] = (code / 65536) % 256;
+            jj.ev.sa[m + 1] = (code / 256) % 256;
+            jj.ev.sa[m + 2] = code % 256;
+            m += 3;
+            code = 0;
+            got = 0;
+        }
+        i += 1;
+    }
+    if got == 3 {
+        jj.ev.sa[m] = (code / 1024) % 256;
+        jj.ev.sa[m + 1] = (code / 4) % 256;
+        m += 2;
+    } else if got == 2 {
+        jj.ev.sa[m] = (code / 16) % 256;
+        m += 1;
+    } else if got == 1 {
+        return jqerr(typed(doc, filter, sv) + " trailing base64 byte found");
+    }
+    return bytes_string(m);
+}
+
+fn html_uri_of(doc: text, filter: text, v: i64, mode: i64) -> i64 {
+    let sv = tostring_of(doc, filter, v);
+    if sv < 0 { return -1; }
+    jj.ev.tmp3 = "";
+    if !fmt_escape(doc, sv, mode) { return -1; }
+    return built_string();
+}
+
+fn format_fn(doc: text, filter: text, id: i64, v: i64) -> i64 {
+    if id == 35 { return csv_of(doc, filter, v, false); }
+    if id == 36 { return csv_of(doc, filter, v, true); }
+    if id == 37 { return html_uri_of(doc, filter, v, 2); }
+    if id == 38 { return html_uri_of(doc, filter, v, 4); }
+    if id == 39 { return sh_of(doc, filter, v); }
+    if id == 40 { return base64_of(doc, filter, v); }
+    return base64d_of(doc, filter, v);
+}
+
+// ---- explode, implode, fromjson, indices ----
+
+fn int_val(x: i64) -> i64 {
+    return ent(4, 4, x, 0);
+}
+
+fn explode_of(doc: text, filter: text, v: i64) -> i64 {
+    if jj.v.vt[v] != 5 { return jqerr("explode input must be a string"); }
+    let n = str_plain(doc, v, 0);
+    let out = arr_new();
+    if out < 0 { return -1; }
+    var i = 0;
+    while i < n {
+        let b = byte_at(jj.tmp, i);
+        var cp = b;
+        var l = 1;
+        if b >= 240 { l = 4; cp = b & 7; } else if b >= 224 { l = 3; cp = b & 15; } else if b >= 192 { l = 2; cp = b & 31; }
+        var k = 1;
+        while k < l && i + k < n {
+            cp = cp * 64 + (byte_at(jj.tmp, i + k) & 63);
+            k += 1;
+        }
+        let h = int_val(cp);
+        if h < 0 { return -1; }
+        if !arr_push(out, h) { return -1; }
+        i += l;
+    }
+    return arr_done(out);
+}
+
+fn implode_of(doc: text, filter: text, v: i64) -> i64 {
+    if jj.v.vt[v] != 6 { return jqerr("implode input must be an array"); }
+    let a = built_of(doc, v);
+    if a < 0 { return -1; }
+    jj.ev.tmp3 = "";
+    var p = jj.v.va[a];
+    while p >= 0 {
+        if jj.v.vt[p] != 4 { return jqerr(typed(doc, filter, p) + " can't be imploded, unicode codepoint needs to be numeric"); }
+        let x = numd(doc, filter, p);
+        var cp = 65533;
+        if x >= 0.0 && x < 1114112.0 { cp = dtoi(x); }
+        if cp >= 55296 && cp <= 57343 { cp = 65533; }
+        if len(jj.ev.tmp3) > 900000 { return jqerr("the string built by implode is too long (over 900000 bytes)"); }
+        jj.ev.tmp3 += chr(cp);
+        p = jj.v.vn[p];
+    }
+    return built_string();
+}
+
+// ---- fromjson: strict JSON only (nan, Infinity, leading zeros, ... are errors here); containers on an explicit stack ----
+
+fn fj_b(i: i64) -> i64 {
+    if i < 0 { return -1; }
+    return byte_at(jj.ev.scr, jj.ev.fjb + i);
+}
+
+fn fj_ws(i0: i64, n: i64) -> i64 {
+    var i = i0;
+    while i < n {
+        let c = fj_b(i);
+        if c == 32 || c == 9 || c == 10 || c == 13 { i += 1; } else { break; }
+    }
+    return i;
+}
+
+fn fj_err(doc: text, filter: text, sv: i64) -> i64 {
+    return jqerr("fromjson: the text is not strict JSON, which is all jx parses (while parsing " + typed(doc, filter, sv) + ")");
+}
+
+fn fj_hex(i: i64, n: i64) -> i64 {
+    if i + 4 > n { return -1; }
+    var x = 0;
+    var k = 0;
+    while k < 4 {
+        let c = fj_b(i + k);
+        var d = -1;
+        if c >= 48 && c <= 57 { d = c - 48; } else if c >= 97 && c <= 102 { d = c - 87; } else if c >= 65 && c <= 70 { d = c - 55; }
+        if d < 0 { return -1; }
+        x = x * 16 + d;
+        k += 1;
+    }
+    return x;
+}
+
+// the string at i (its quote): the handle in jj.ev.fjv, the position after it, or -1
+fn fj_string(i0: i64, n: i64) -> i64 {
+    var i = i0 + 1;
+    var rs = i;
+    jj.ev.tmp3 = "";
+    while true {
+        if i >= n { return -1; }
+        let c = fj_b(i);
+        if c == 34 { break; }
+        if c < 32 { return -1; }
+        if c != 92 { i += 1; continue; }
+        if i > rs { jj.ev.tmp3 += substr(jj.ev.scr, jj.ev.fjb + rs, i - rs); }
+        let d = fj_b(i + 1);
+        var cp = -1;
+        var adv = 2;
+        if d == 34 { cp = 34; } else if d == 92 { cp = 92; } else if d == 47 { cp = 47; } else if d == 98 { cp = 8; }
+        else if d == 102 { cp = 12; } else if d == 110 { cp = 10; } else if d == 114 { cp = 13; } else if d == 116 { cp = 9; }
+        else if d == 117 {
+            cp = fj_hex(i + 2, n);
+            adv = 6;
+            if cp < 0 { return -1; }
+            if cp >= 55296 && cp <= 56319 {
+                if fj_b(i + 6) != 92 || fj_b(i + 7) != 117 { return -1; }
+                let lo = fj_hex(i + 8, n);
+                if lo < 56320 || lo > 57343 { return -1; }
+                cp = 65536 + (cp - 55296) * 1024 + (lo - 56320);
+                adv = 12;
+            } else if cp >= 56320 && cp <= 57343 { return -1; }
+        }
+        if cp < 0 { return -1; }
+        jj.ev.tmp3 += chr(cp);
+        i += adv;
+        rs = i;
+    }
+    if i > rs { jj.ev.tmp3 += substr(jj.ev.scr, jj.ev.fjb + rs, i - rs); }
+    if len(jj.ev.scr) + len(jj.ev.tmp3) > 16000000 { return -1; }
+    let off = len(jj.ev.scr);
+    jj.ev.scr += jj.ev.tmp3;
+    jj.ev.fjv = ent(5, 2, off, len(jj.ev.tmp3));
+    if jj.ev.fjv < 0 { return -1; }
+    return i + 1;
+}
+
+fn fj_lit(i: i64, n: i64, w: text) -> bool {
+    let m = len(w);
+    if i + m > n { return false; }
+    var k = 0;
+    while k < m {
+        if fj_b(i + k) != byte_at(w, k) { return false; }
+        k += 1;
+    }
+    return true;
+}
+
+// the number at i: its end, or -1
+fn fj_number_end(i0: i64, n: i64) -> i64 {
+    var i = i0;
+    if fj_b(i) == 45 { i += 1; }
+    if i >= n || !is_digit(fj_b(i)) { return -1; }
+    if fj_b(i) == 48 { i += 1; } else { while i < n && is_digit(fj_b(i)) { i += 1; } }
+    if i < n && fj_b(i) == 46 {
+        i += 1;
+        if i >= n || !is_digit(fj_b(i)) { return -1; }
+        while i < n && is_digit(fj_b(i)) { i += 1; }
+    }
+    if i < n && (fj_b(i) == 101 || fj_b(i) == 69) {
+        i += 1;
+        if i < n && (fj_b(i) == 43 || fj_b(i) == 45) { i += 1; }
+        if i >= n || !is_digit(fj_b(i)) { return -1; }
+        while i < n && is_digit(fj_b(i)) { i += 1; }
+    }
+    return i;
+}
+
+fn fromjson_of(doc: text, filter: text, v: i64) -> i64 {
+    if jj.v.vt[v] != 5 { return jqerr(typed(doc, filter, v) + " only strings can be parsed"); }
+    let n0 = str_plain(doc, v, 0);
+    if len(jj.ev.scr) + n0 > 15000000 { return jqerr("fromjson: the text is too long"); }
+    jj.ev.fjb = len(jj.ev.scr);
+    jj.ev.scr += jj.tmp;
+    let n = n0;
+    let sv = v;
+    var top = -1;
+    var i = fj_ws(0, n);
+    var need = true;
+    var val = -1;
+    var result = -1;
+    while true {
+        if need {
+            if i >= n { return fj_err(doc, filter, sv); }
+            let c = fj_b(i);
+            val = -1;
+            if c == 91 || c == 123 {
+                if top >= 23 { return jqerr("fromjson: nested more than 24 levels, which jx does not parse"); }
+                top += 1;
+                if c == 91 { jj.ev.sb[top] = arr_new(); jj.ev.sk[top] = 6; }
+                else { jj.ev.sb[top] = ent(7, 1, -1, -1); jj.ev.sk[top] = 7; if jj.ev.sb[top] >= 0 { jj.v.vf[jj.ev.sb[top]] = 0; } }
+                if jj.ev.sb[top] < 0 { return -1; }
+                jj.ev.sa[top] = -1;
+                i = fj_ws(i + 1, n);
+                if i < n && fj_b(i) == 93 && c == 91 { val = arr_done(jj.ev.sb[top]); top -= 1; i += 1; need = false; }
+                else if i < n && fj_b(i) == 125 && c == 123 { val = jj.ev.sb[top]; top -= 1; i += 1; need = false; }
+                else if c == 123 {
+                    if i >= n || fj_b(i) != 34 { return fj_err(doc, filter, sv); }
+                    i = fj_string(i, n);
+                    if i < 0 { return fj_err(doc, filter, sv); }
+                    jj.ev.sa[top] = jj.ev.fjv;
+                    i = fj_ws(i, n);
+                    if i >= n || fj_b(i) != 58 { return fj_err(doc, filter, sv); }
+                    i = fj_ws(i + 1, n);
+                }
+                if need { continue; }
+            } else if c == 34 {
+                i = fj_string(i, n);
+                if i < 0 { return fj_err(doc, filter, sv); }
+                val = jj.ev.fjv;
+                need = false;
+            } else if (c == 45 && fj_b(i + 1) >= 48 && fj_b(i + 1) <= 57) || is_digit(c) {
+                let e = fj_number_end(i, n);
+                if e < 0 { return fj_err(doc, filter, sv); }
+                if len(jj.ev.scr) + (e - i) + 1 > 16000000 { return jqerr("fromjson: too many bytes of numbers and strings"); }
+                let off = len(jj.ev.scr);
+                jj.ev.scr += substr(jj.ev.scr, jj.ev.fjb + i, e - i);
+                jj.ev.scr += " ";
+                val = ent(4, 2, off, off + e - i);
+                if val < 0 { return -1; }
+                jj.v.vf[val] = 0;
+                i = e;
+                need = false;
+            } else if fj_lit(i, n, "true") { val = jj.ev.htrue; i += 4; need = false; }
+            else if fj_lit(i, n, "false") { val = jj.ev.hfalse; i += 5; need = false; }
+            else if fj_lit(i, n, "null") { val = jj.ev.hnull; i += 4; need = false; }
+            else if fj_lit(i, n, "nan") || fj_lit(i, n, "NaN") { let z = 0.0; val = mk_dbl(z / z); i += 3; need = false; if val < 0 { return -1; } }
+            else if fj_lit(i, n, "-nan") || fj_lit(i, n, "-NaN") { let z = 0.0; val = mk_dbl(z / z); i += 4; need = false; if val < 0 { return -1; } }
+            else if fj_lit(i, n, "Infinity") || fj_lit(i, n, "infinity") { let z = 0.0; val = mk_dbl(1.0 / z); i += 8; need = false; if val < 0 { return -1; } }
+            else if fj_lit(i, n, "-Infinity") || fj_lit(i, n, "-infinity") { let z = 0.0; val = mk_dbl(-1.0 / z); i += 9; need = false; if val < 0 { return -1; } }
+            else { return fj_err(doc, filter, sv); }
+        }
+        // a value is complete: attach it
+        if top < 0 {
+            i = fj_ws(i, n);
+            if i != n { return fj_err(doc, filter, sv); }
+            result = val;
+            break;
+        }
+        if jj.ev.sk[top] == 6 { if !arr_push(jj.ev.sb[top], val) { return -1; } }
+        else if bc_objp(doc, jj.ev.sb[top], jj.ev.sa[top], val) != 0 { return -1; }
+        i = fj_ws(i, n);
+        if i >= n { return fj_err(doc, filter, sv); }
+        let d = fj_b(i);
+        if d == 44 {
+            i = fj_ws(i + 1, n);
+            if jj.ev.sk[top] == 7 {
+                if i >= n || fj_b(i) != 34 { return fj_err(doc, filter, sv); }
+                i = fj_string(i, n);
+                if i < 0 { return fj_err(doc, filter, sv); }
+                jj.ev.sa[top] = jj.ev.fjv;
+                i = fj_ws(i, n);
+                if i >= n || fj_b(i) != 58 { return fj_err(doc, filter, sv); }
+                i = fj_ws(i + 1, n);
+            }
+            need = true;
+            continue;
+        }
+        if (d == 93 && jj.ev.sk[top] == 6) || (d == 125 && jj.ev.sk[top] == 7) {
+            if d == 93 { val = arr_done(jj.ev.sb[top]); } else { val = jj.ev.sb[top]; }
+            top -= 1;
+            i += 1;
+            need = false;
+            continue;
+        }
+        return fj_err(doc, filter, sv);
+    }
+    return result;
+}
+
+// the element indices of the subsequence b in array a (jq's jv_array_indexes): [] when b is empty or absent
+fn array_indices(doc: text, filter: text, v: i64, x: i64, sub: bool) -> i64 {
+    let a = built_of(doc, v);
+    if a < 0 { return -1; }
+    var b = -1;
+    var m = 1;
+    if sub {
+        b = built_of(doc, x);
+        if b < 0 { return -1; }
+        m = jj.v.vf[b];
+    }
+    let out = arr_new();
+    if out < 0 { return -1; }
+    if m == 0 { return arr_done(out); }
+    var ai = 0;
+    var p = jj.v.va[a];
+    while p >= 0 {
+        var ok = true;
+        if sub {
+            var q = p;
+            var r = jj.v.va[b];
+            while r >= 0 && ok {
+                if q < 0 { ok = false; break; }
+                let c = cmp_vals(doc, filter, q, r);
+                if c == -2 { return -1; }
+                if c != 0 { ok = false; }
+                q = jj.v.vn[q];
+                r = jj.v.vn[r];
+            }
+        } else {
+            let c = cmp_vals(doc, filter, p, x);
+            if c == -2 { return -1; }
+            if c != 0 { ok = false; }
+        }
+        if ok {
+            let h = int_val(ai);
+            if h < 0 { return -1; }
+            if !arr_push(out, h) { return -1; }
+        }
+        ai += 1;
+        p = jj.v.vn[p];
+    }
+    return arr_done(out);
+}
+
+// indices($i) as jq 1.8.2 defines it (strings: codepoint offsets of overlapping matches)
+fn indices_of(doc: text, filter: text, v: i64, x: i64) -> i64 {
+    let tv = jj.v.vt[v];
+    let tx = jj.v.vt[x];
+    if tv == 6 { return array_indices(doc, filter, v, x, tx == 6); }
+    if tv == 5 && tx == 5 {
+        let na = str_plain(doc, v, 0);
+        let nb = str_plain(doc, x, 2);
+        let out = arr_new();
+        if out < 0 { return -1; }
+        if nb == 0 { return arr_done(out); }
+        var i = 0;
+        var cpi = 0;
+        while i + nb <= na {
+            let b = byte_at(jj.tmp, i);
+            if (b & 192) != 128 {
+                if bytes_cmp(jj.tmp, i, nb, jj.ev.tmp2, 0, nb) == 0 {
+                    let h = int_val(cpi);
+                    if h < 0 { return -1; }
+                    if !arr_push(out, h) { return -1; }
+                }
+                cpi += 1;
+            }
+            i += 1;
+        }
+        return arr_done(out);
+    }
+    if tv == 1 {
+        if tx == 4 || tx == 5 || tx == 7 { return jj.ev.hnull; }
+        return jqerr("Cannot index null with " + typed(doc, filter, x));
+    }
+    if tv == 7 && tx == 5 {
+        let o = built_of(doc, v);
+        if o < 0 { return -1; }
+        let r = obj_get(doc, o, x);
+        if r < 0 { return jj.ev.hnull; }
+        return r;
+    }
+    if tv == 5 && tx == 7 { return jqerr("Array/string slice indices must be integers"); }
+    return jqerr("Cannot index " + tag_name(tv) + " with " + typed(doc, filter, x));
+}
+
 fn lib_fn(doc: text, filter: text, id: i64, v: i64) -> i64 {
+    if id == 42 { return explode_of(doc, filter, v); }
+    if id == 43 { return implode_of(doc, filter, v); }
+    if id == 44 { return fromjson_of(doc, filter, v); }
+    if id >= 35 && id <= 41 { return format_fn(doc, filter, id, v); }
     if id == 34 { return from_entries_of(doc, filter, v); }
     if id == 20 { return by_impl(doc, filter, v, -1, 0); }
     if id == 21 { return reverse_of(doc, filter, v); }
@@ -610,6 +1215,7 @@ fn bc_fn2(doc: text, filter: text, id: i64, v: i64, x: i64) -> i64 {
     if id >= 200 { return math_fn2(doc, filter, id, v, x); }
     if id == 100 { return flatten_of(doc, filter, v, x); }
     if id == 101 { return contains_of(doc, filter, v, x); }
+    if id == 120 { return indices_of(doc, filter, v, x); }
     if id >= 102 && id <= 106 { return string_fn2(doc, filter, id, v, x); }
     return by_impl(doc, filter, v, x, id - 111);
 }

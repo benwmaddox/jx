@@ -127,7 +127,7 @@ def gen_expr(r, depth):
 
 S3_MATH = ["floor", "ceil", "round", "sqrt", "fabs", "trunc", "abs", "exp2", "log2", "cbrt"]
 S3_STR = ["ascii_downcase", "ascii_upcase", "tojson", "utf8bytelength", "trim", "ltrim", "rtrim", 'ltrimstr("a")', 'rtrimstr("b")', 'startswith("a")',
-          'endswith("b")', 'split(",")', 'split("a")', 'trimstr("a")', "tostring", "length"]
+          'endswith("b")', 'split(",")', 'explode', 'explode | implode', 'tojson | fromjson', 'indices("a")', 'index("a")', 'rindex("a")', 'indices(1)', 'indices([1])', 'indices([1,2])', 'indices(null)', 'tostring | fromjson?', '@text', '@json', '@html', '@uri', '@sh', '@base64', '@csv', '@tsv', '(@base64 | @base64d)', '"<\\(.)>"', '@json "v=\\(.)"', '@html "<\\(.)>"', '@sh "echo \\(.)"', '@uri "?q=\\(.)"',  'split("a")', 'trimstr("a")', "tostring", "length"]
 S3_COLL = ["sort", "unique", "reverse", "min", "max", "add", "flatten", "any", "all", "to_entries", "keys_unsorted", "transpose", "join(\",\")", "join(1)",
            "group_by(.)", "sort_by(.a)", "group_by(.a)", "unique_by(.a)", "min_by(.a)", "max_by(.a)", 'contains(["a"])', 'inside([1,"a"])', 'IN(1,"a")',
            "flatten(1)", "map_values(.)", "map_values(length?)", "map_values(select(. != null))", "map({key: tostring, value: .}) | from_entries", "to_entries | from_entries", "with_entries(select(.value != null))", "map({k: tostring, value: .}) | from_entries?", "map({name: tostring, Value: .}) | from_entries", "map({Key: (.|tostring), v: .}) | from_entries", "from_entries", "with_entries(.)", "first", "last", "length"]
@@ -147,6 +147,9 @@ def gen_s3(r, depth):
         return ex % p
     if k < 0.42:
         return "%s as %s | %s" % (r.choice([p, "[" + p + "]", "{a:1,b:[2]}", "[1,[2]]"]), r.choice(S3_PAT), r.choice(["[$x, $y]", "$x", "[.]", "{$x}", "[$a]", "[$x, $a, $b]"]))
+    if k < 0.46:
+        pats = r.sample(S3_PAT, r.randint(2, 3))
+        return "%s as %s | %s" % (r.choice([p, "[" + p + "]", ".[]?", "[.[]?][]"]), " ?// ".join(pats), r.choice(["[$x, $y]", "$x", "[$a, $b]", "[$x, $a]", "if $x then $y else error(\"e\") end", "[$x, $y, $a, $b]", "($x | length)"]))
     if k < 0.52:
         return r.choice(["def f: %s; f", "def f(g): g | length; f(%s)", "def f($a): [$a, .]; f(%s)", "def f(g): [g]; f(%s)", "def f: def g: %s; g; f"]) % r.choice([p, q, "length"])
     if k < 0.66:

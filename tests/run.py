@@ -130,14 +130,9 @@ nsyn = len(lines("syntax.txt"))
 # options: unknown or unsupported options are refused by name (jq exits 2; a program can only exit with 1)
 opt_ok = 0
 opt_cases = [(["-Z", ".a"], b"unknown option '-Z'"), ([".a", "-Z"], b"unknown option '-Z'"), (["-S", ".a"], b"'-S' is not supported yet"),
-             ([".a", "-S"], b"'-S' is not supported yet"), (["-n", ".a"], b"'-n' is not supported yet"), (["-s", ".a"], b"'-s' is not supported yet"),
-             (["-e", ".a"], b"'-e' is not supported yet"), (["-C", ".a"], b"'-C' is not supported yet"), (["--tab", ".a"], b"'--tab' is not supported yet"),
-             ([".a", "--tab"], b"'--tab' is not supported yet"), (["--indent", "4", ".a"], b"'--indent' is not supported yet"),
-             ([".a", "--indent", "4"], b"'--indent' is not supported yet"), (["--arg", "x", "1", ".a"], b"'--arg' is not supported yet"),
-             (["--indent=4", ".a"], b"'--indent' is not supported yet"), (["--bogus", ".a"], b"unknown option '--bogus'"), ([".a", "--bogus"], b"unknown option '--bogus'"),
-             (["--raw-output0", ".a"], b"'--raw-output0' is not supported yet"), (["--null-input", ".a"], b"'--null-input' is not supported yet"),
-             ([".a", "--sort-keys"], b"'--sort-keys' is not supported yet"), (["--exit-status", ".a"], b"'--exit-status' is not supported yet"),
-             (["-cS", ".a"], b"'-S' is not supported yet"), (["-cZ", ".a"], b"unknown option '-Z'"), ([".a", "other.json"], b"input files are not supported")]
+             ([".a", "-S"], b"'-S' is not supported yet"), (["-s", ".a"], b"'-s' is not supported yet"),
+             (["-C", ".a"], b"'-C' is not supported yet"), (["--indent=4", ".a"], b"unknown option '--indent'"), (["--bogus", ".a"], b"unknown option '--bogus'"), ([".a", "--bogus"], b"unknown option '--bogus'"),
+             (["--raw-output0", ".a"], b"'--raw-output0' is not supported yet"), ([".a", "--sort-keys"], b"'--sort-keys' is not supported yet"), (["-cS", ".a"], b"'-S' is not supported yet"), (["-cZ", ".a"], b"unknown option '-Z'"), ([".a", "other.json"], b"input files are not supported")]
 for args, want in opt_cases:
     with open(T + "/docs/simple.json", "rb") as f:
         p = subprocess.run([JX] + args, stdin=f, capture_output=True)
@@ -146,7 +141,10 @@ for args, want in opt_cases:
     else: failures.append("option: %s (rc=%d, stdout=%r, stderr=%r)" % (" ".join(args), p.returncode, p.stdout[:30], p.stderr[:80]))
 # accepted option forms, anywhere, and the default filter
 for args, want in (([".users[0].n", "-c"], b'"ann"\n'), (["-c", "--raw-output", ".users[0].n"], b"ann\n"), ([".users[0].n", "--compact-output", "-r"], b"ann\n"), (["-cr", ".users[0].n"], b"ann\n"),
-                   ([".users[0].n", "--", "-c"], None), (["--compact-output"], None)):
+                   ([".users[0].n", "--", "-c"], None), (["--compact-output"], None),
+                   (["-n", "-c", "[1,2] | length"], b"2\n"), (["-c", "--arg", "x", "a b", "-n", "[$x]"], b'["a b"]\n'), (["-nc", "--argjson", "j", '{"a":[1,2.50]}', "$j"], b'{"a":[1,2.50]}\n'),
+                   (["-nc", "$ARGS.named", "--arg", "k", "v"], b'{"k":"v"}\n'), (["-nc", "$ARGS.positional", "--args", "p", "q"], b'["p","q"]\n'), (["--tab", ".users[0].addr.zip"], b"78701\n"),
+                   (["-j", ".users[0].n"], b'ann'), (["-e", ".users[0].n"], b'"ann"\n'), (["-c", "--indent", "3", ".users[0].tags"], None)):
     with open(T + "/docs/simple.json", "rb") as f:
         p = subprocess.run([JX] + args, stdin=f, capture_output=True)
     opt_n_extra = 1

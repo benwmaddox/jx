@@ -2,14 +2,9 @@
 ..
 .[-1]
 .[.k]
-@base64
-@csv
-"a \(.b)"
-with_entries(.)
 walk(.)
 paths
 getpath(["a"])
-fromjson
 .a = 1
 .a |= 1
 .a += 1
