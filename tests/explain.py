@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Golden explain output: tests/explain.txt holds (filter, expected `jx --explain FILTER` output: the automaton, the scopes and the program) pairs; this checks
-every pair against the exe (stdin is closed: the runtime reads standard input to its end before main runs, even for --explain), so a change in the automaton or the lowering shows up as a diff to review.
+every pair against the exe (stdin is closed; jx no longer reads stdin for --explain, -n, -h or -V), so a change in the automaton or the lowering shows up as a diff to review.
 Format of explain.txt: a line `### FILTER` (the filter text), then the dump lines up to the next `### `.
 usage: python tests/explain.py [jx.exe]            check (exit 1 on any difference)
        python tests/explain.py [jx.exe] --update   rewrite tests/explain.txt from the exe (review the git diff)

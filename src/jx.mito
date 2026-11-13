@@ -269,6 +269,7 @@ struct J {
     ps_l: i64[32];
     posmode: i64;                 // 0 files, 1 --args, 2 --jsonargs
     slurp: bool;                  // -s: the input document is wrapped in an array
+    help: i64;                    // 1 --help or -h, 2 --version or -V: print and stop before anything is read
     explain: bool;                // --explain: print the automaton and the program in readable form and stop
     dump: bool;                   // --dump-program: print the bytecode and stop
     wv_used: i64;
@@ -328,14 +329,14 @@ fn known_long(args: text, s: i64, e: i64) -> bool {
     if arg_is(args, s, e, "--sort-keys") || arg_is(args, s, e, "--color-output") { return true; }
     if arg_is(args, s, e, "--raw-output0") { return true; }
     if arg_is(args, s, e, "--raw-input") || arg_is(args, s, e, "--from-file") || arg_is(args, s, e, "--library-path") { return true; }
-    if arg_is(args, s, e, "--binary") || arg_is(args, s, e, "--help") || arg_is(args, s, e, "--version") { return true; }
+    if arg_is(args, s, e, "--binary") { return true; }
     if arg_is(args, s, e, "--build-configuration") || arg_is(args, s, e, "--strict") { return true; }
     return false;
 }
 
 // a short option letter of jq that jx does not have yet
 fn known_short(c: i64) -> bool {
-    return c == 83 || c == 67 || c == 102 || c == 76 || c == 82 || c == 104 || c == 86 || c == 98 || c == 48;
+    return c == 83 || c == 67 || c == 102 || c == 76 || c == 82 || c == 98 || c == 48;
 }
 
 // the end of the argument that starts at s (its 0 byte), or n
@@ -430,6 +431,8 @@ fn parse_opts(args: text) -> i64 {
                 else if arg_is(args, s, e, "--tab") { jj.o.tab = true; jj.o.pretty = true; }
                 else if arg_is(args, s, e, "--args") { jj.posmode = 1; }
                 else if arg_is(args, s, e, "--jsonargs") { jj.posmode = 2; }
+                else if arg_is(args, s, e, "--help") { jj.help = 1; return 0; }
+                else if arg_is(args, s, e, "--version") { jj.help = 2; return 0; }
                 else if arg_is(args, s, e, "--indent") || arg_is(args, s, e, "--arg") || arg_is(args, s, e, "--argjson") {
                     let nx = take_params(args, s, e);
                     if nx < 0 { return 2; }
@@ -457,6 +460,8 @@ fn parse_opts(args: text) -> i64 {
                     else if c == 101 { jj.estatus = true; }
                     else if c == 106 { jj.o.raw = true; jj.o.nonl = true; }
                     else if c == 77 { jj.o.tab = jj.o.tab; }
+                    else if c == 104 { jj.help = 1; return 0; }
+                    else if c == 86 { jj.help = 2; return 0; }
                     else {
                         jj.exitc = 2;
                         let one = "-" + substr(args, k, 1);
@@ -486,18 +491,27 @@ fn parse_opts(args: text) -> i64 {
     return 0;
 }
 
-// the input size is the one literal in `doc: utf8<N>` below (1 GiB; reserved address space, committed as the input is read)
+fn help_text() -> text {
+    return "Usage: jx [OPTIONS] FILTER [FILE]\n"
+        + "jx reads one JSON document (standard input, or one file) in a single pass and runs a jq filter over it.\n\n"
+        + "Options (see the README for the exact list): -c -r -j -a -s -n -e --tab --indent N --arg --argjson --args --jsonargs --seq --validate -h -V\n"
+        + "Not supported (exit 1 or 2): regex, walk, path functions, assignment, recursive descent, dates, modules, -S, -C.\n";
+}
+
 @main
-fn main(args: utf8<0..1048576> from args, doc: utf8<4294967295> from stdin) -> Response<text> {
+fn main(args: utf8<0..1048576> from args) -> Response<text> {
     jj.exitc = 1;
     jj.argtxt = args;
     var rc = parse_opts(args);
+    if rc == 0 && jj.help == 1 { return ok(help_text()); }
+    if rc == 0 && jj.help == 2 { return ok("jx 0.1\n"); }
     if jj.o.ascii { jj.o.raw = false; }
     if rc == 0 {
         if jj.nullin {
             if jj.fs < 0 { rc = go(".", "null"); }
             else { rc = go(substr(args, jj.fs, jj.fe - jj.fs), "null"); }
         } else if jj.slurp {
+            let doc = stdin_text(4294967295);
             // -s: the one document becomes the only element of an array (no input at all: an empty array); a second value is the usual error
             if skip_ws(doc, 0) >= len(doc) {
                 if jj.fs < 0 { rc = go(".", "[]"); }
@@ -505,6 +519,7 @@ fn main(args: utf8<0..1048576> from args, doc: utf8<4294967295> from stdin) -> R
             } else if jj.fs < 0 { rc = go("[.] | .", doc); }
             else { rc = go("[.] | (" + substr(args, jj.fs, jj.fe - jj.fs) + ")", doc); }
         } else {
+            let doc = stdin_text(4294967295);
             if jj.fs < 0 { rc = go(".", doc); }
             else { rc = go(substr(args, jj.fs, jj.fe - jj.fs), doc); }
         }
