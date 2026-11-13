@@ -130,7 +130,7 @@ nsyn = len(lines("syntax.txt"))
 # options: unknown or unsupported options are refused by name (jq exits 2; a program can only exit with 1)
 opt_ok = 0
 opt_cases = [(["-Z", ".a"], b"unknown option '-Z'"), ([".a", "-Z"], b"unknown option '-Z'"), (["-S", ".a"], b"'-S' is not supported yet"),
-             ([".a", "-S"], b"'-S' is not supported yet"), (["-s", ".a"], b"'-s' is not supported yet"),
+             ([".a", "-S"], b"'-S' is not supported yet"), (["-f", ".a"], b"'-f' is not supported yet"),
              (["-C", ".a"], b"'-C' is not supported yet"), (["--indent=4", ".a"], b"unknown option '--indent'"), (["--bogus", ".a"], b"unknown option '--bogus'"), ([".a", "--bogus"], b"unknown option '--bogus'"),
              (["--raw-output0", ".a"], b"'--raw-output0' is not supported yet"), ([".a", "--sort-keys"], b"'--sort-keys' is not supported yet"), (["-cS", ".a"], b"'-S' is not supported yet"), (["-cZ", ".a"], b"unknown option '-Z'"), ([".a", "other.json"], b"input files are not supported")]
 for args, want in opt_cases:
@@ -151,6 +151,15 @@ for args, want in (([".users[0].n", "-c"], b'"ann"\n'), (["-c", "--raw-output", 
     if want is None: continue
     if p.returncode == 0 and p.stdout.replace(b"\r\n", b"\n") == want: opt_ok += 1
     else: failures.append("option form: %s (rc=%d, stdout=%r)" % (" ".join(args), p.returncode, p.stdout[:40]))
+    opt_cases.append(None)
+# -s, -a, --seq: expected output byte for byte (checked against jq 1.8.2 by hand when written)
+for args, doc, want in ((["-c", "-s", "."], b'{"a":1}', b'[{"a":1}]\n'), (["-c", "-s", "length"], b'', b'0\n'), (["-c", "-s", "."], b'', b'[]\n'), (["-s", "-c", ".[0].a"], b'{"a":5}', b'5\n'),
+                        (["-c", "-a", "."], b'["\xc3\xa9\xf0\x9f\x98\x80\x7f"]', b'["\\u00e9\\ud83d\\ude00\\u007f"]\n'), (["-r", "-a", "."], b'"\xc3\xa9"', b'"\\u00e9"\n'),
+                        (["-c", "-a", '{"k\\u00e9": .}'], b'"\xc3\xa9"', b'{"k\\u00e9":"\\u00e9"}\n'),
+                        (["-c", "--seq", "."], b'[1,2]', b'\x1e[1,2]\n'), (["-c", "--seq", ".[]"], b'[1,2]', b'\x1e1\n\x1e2\n'), (["-sc", "map(.a)"], b'{"a":1}', b'[1]\n')):
+    p = subprocess.run([JX] + args, input=doc, capture_output=True)
+    if p.returncode == 0 and p.stdout.replace(b"\r\n", b"\n") == want: opt_ok += 1
+    else: failures.append("option form: %s %r (rc=%d, stdout=%r)" % (" ".join(args), doc, p.returncode, p.stdout[:60]))
     opt_cases.append(None)
 # exit codes as jq's: 3 syntax error in the filter, 5 an error while the filter runs or invalid input, 1 not supported
 exit_ok = 0

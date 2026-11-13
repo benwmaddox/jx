@@ -154,7 +154,7 @@ fn nav_check(n: i64) -> i64 {
     var tag = 0;
     while jj.f.par[c] >= 0 {
         let p = jj.f.par[c];
-        if jj.sc.serrg[p] == gen_of(p) && jj.f.niter[p] != c {
+        if (jj.sc.serrg[p] == gen_of(p) || jj.sc.serrgi[p] == gen_of(p)) && jj.f.niter[p] != c {
             // the kind of the edge from p to c
             var e = jj.f.nfirst[p];
             while e != 0 {
@@ -162,8 +162,8 @@ fn nav_check(n: i64) -> i64 {
                 e = jj.f.enext[e];
             }
             if e != 0 {
-                if jj.f.ekind[e] == 0 && jj.sc.serr[p] != 0 { bad = c; tag = jj.sc.serr[p]; }
-                if jj.f.ekind[e] == 1 && jj.sc.serri[p] != 0 { bad = c; tag = jj.sc.serri[p]; }
+                if jj.f.ekind[e] == 0 && jj.sc.serr[p] != 0 && jj.sc.serrg[p] == gen_of(p) { bad = c; tag = jj.sc.serr[p]; }
+                if jj.f.ekind[e] == 1 && jj.sc.serri[p] != 0 && jj.sc.serrgi[p] == gen_of(p) { bad = c; tag = jj.sc.serri[p]; }
             }
         }
         c = p;
@@ -1331,6 +1331,14 @@ fn tonumber_of(doc: text, filter: text, v: i64) -> i64 {
         let a = jj.v.va[v] + 1;
         let b = jj.v.vb[v] - 1;
         return number_lit_doc(doc, a, b);
+    }
+    // any other string that is a JSON number keeps its literal form too (as jq 1.8.2 keeps the digits), held in the scratch string
+    if strict {
+        let st = len(jj.ev.scr);
+        jj.ev.scr += substr(jj.tmp, 0, n);
+        let h = number_lit_doc(jj.ev.scr, st, st + n);
+        if h >= 0 && jj.v.vs[h] == 0 { jj.v.vs[h] = 2; }
+        return h;
     }
     var x = 0.0;
     if strict { x = num_parse(jj.tmp, 0, n); }

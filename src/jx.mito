@@ -136,6 +136,7 @@ struct Scan {
     skh: i64[256];                // collected keys of an object slot: first entry, -1 none
     skn: i64[256];
     serr: i64[256];               // the tag of a value that could not be navigated below this node (0 none)
+    serrgi: i64[256];
     serrg: i64[256];
     serri: i64[256];              // the same for index children of a value that is not an array
 }
@@ -150,6 +151,8 @@ struct Out {
     ind: i64;                     // spaces per indent level (--indent), 2 by default
     tab: bool;                    // --tab
     nonl: bool;                   // -j: no newline after a result
+    ascii: bool;                  // -a: non-ASCII characters written as escapes
+    seq: bool;                    // --seq: a record separator (U+001E) before each result
     lastpos: i64;                 // where the last result starts in text (-e)
 }
 
@@ -212,7 +215,8 @@ struct Ev {
     ms_cnt: i64[260];
     ms_key: i64[260];
     errv: i64;                    // the value of the last error (an entry), -1 none
-    errfrom: i64;                 // the try whose continuation failed
+    gpend: i64[2048];             // while unwinding: the tries whose continuation was left (a try skips an error that came from its own continuation)
+    gpn: i64;
     stopto: i64;                  // the limit or first that wants the enumeration to stop
     rerrv: i64[64];               // a deferred error's value
     rec: i64;                     // recursion depth of the value functions
@@ -264,6 +268,8 @@ struct J {
     ps_o: i64[32];
     ps_l: i64[32];
     posmode: i64;                 // 0 files, 1 --args, 2 --jsonargs
+    slurp: bool;                  // -s: the input document is wrapped in an array
+    explain: bool;                // --explain: print the automaton and the program in readable form and stop
     dump: bool;                   // --dump-program: print the bytecode and stop
     wv_used: i64;
     wv_bound: i64;
@@ -280,12 +286,17 @@ struct J {
     pstk: i64[10];                // compile: the path of steps of the pattern leaf being parsed: 0 index, 1 key
     pstb: i64[10];
     pstc: i64[10];
+    paren_node: i64;              // compile: the node the last parenthesized term returned
+    lab_count: i64;               // compile: the labels seen so far (the number a break carries)
+    nlab: i64;                    // compile: the labels in scope (a stack): name, variable slot, node
+    lab_off: i64[16];
+    lab_len: i64[16];
+    lab_slot: i64[16];
+    lab_node: i64[16];
     alt_s: i64[8];                // compile: `?//` alternatives: the variable names of each pattern (a range of the scope stack) and its bindings (a range of pbslot)
     alt_e: i64[8];
     alt_b: i64[8];
     alt_be: i64[8];
-    alt_k: i64[8];                // compile: the first byte of each alternative pattern
-    pat_nest: bool;               // compile: a pattern has a container inside a container
     pa: i64[4];
 }
 state jj: J;
@@ -312,19 +323,19 @@ fn usage_error(args: text, s: i64, e: i64, supported_name: bool) -> i64 {
 
 // a jq long option that jx does not have yet
 fn known_long(args: text, s: i64, e: i64) -> bool {
-    if arg_is(args, s, e, "--slurp") || arg_is(args, s, e, "--stream") { return true; }
-    if arg_is(args, s, e, "--stream-errors") || arg_is(args, s, e, "--seq") || arg_is(args, s, e, "--slurpfile") || arg_is(args, s, e, "--rawfile") { return true; }
+    if arg_is(args, s, e, "--stream") { return true; }
+    if arg_is(args, s, e, "--stream-errors") || arg_is(args, s, e, "--slurpfile") || arg_is(args, s, e, "--rawfile") { return true; }
     if arg_is(args, s, e, "--sort-keys") || arg_is(args, s, e, "--color-output") { return true; }
-    if arg_is(args, s, e, "--ascii-output") || arg_is(args, s, e, "--raw-output0") { return true; }
+    if arg_is(args, s, e, "--raw-output0") { return true; }
     if arg_is(args, s, e, "--raw-input") || arg_is(args, s, e, "--from-file") || arg_is(args, s, e, "--library-path") { return true; }
     if arg_is(args, s, e, "--binary") || arg_is(args, s, e, "--help") || arg_is(args, s, e, "--version") { return true; }
-    if arg_is(args, s, e, "--build-configuration") || arg_is(args, s, e, "--strict") || arg_is(args, s, e, "--explain") { return true; }
+    if arg_is(args, s, e, "--build-configuration") || arg_is(args, s, e, "--strict") { return true; }
     return false;
 }
 
 // a short option letter of jq that jx does not have yet
 fn known_short(c: i64) -> bool {
-    return c == 97 || c == 115 || c == 83 || c == 67 || c == 102 || c == 76 || c == 82 || c == 104 || c == 86 || c == 98 || c == 48;
+    return c == 83 || c == 67 || c == 102 || c == 76 || c == 82 || c == 104 || c == 86 || c == 98 || c == 48;
 }
 
 // the end of the argument that starts at s (its 0 byte), or n
@@ -408,7 +419,11 @@ fn parse_opts(args: text) -> i64 {
                 else if arg_is(args, s, e, "--raw-output") { jj.o.raw = true; }
                 else if arg_is(args, s, e, "--validate") { jj.sc.validate = true; }
                 else if arg_is(args, s, e, "--dump-program") { jj.dump = true; }
+                else if arg_is(args, s, e, "--explain") { jj.dump = true; jj.explain = true; }
                 else if arg_is(args, s, e, "--null-input") { jj.nullin = true; }
+                else if arg_is(args, s, e, "--slurp") { jj.slurp = true; }
+                else if arg_is(args, s, e, "--ascii-output") { jj.o.ascii = true; }
+                else if arg_is(args, s, e, "--seq") { jj.o.seq = true; }
                 else if arg_is(args, s, e, "--exit-status") { jj.estatus = true; }
                 else if arg_is(args, s, e, "--join-output") { jj.o.raw = true; jj.o.nonl = true; }
                 else if arg_is(args, s, e, "--monochrome-output") || arg_is(args, s, e, "--unbuffered") { jj.o.tab = jj.o.tab; }
@@ -437,6 +452,8 @@ fn parse_opts(args: text) -> i64 {
                     if c == 99 { jj.o.pretty = false; }
                     else if c == 114 { jj.o.raw = true; }
                     else if c == 110 { jj.nullin = true; }
+                    else if c == 115 { jj.slurp = true; }
+                    else if c == 97 { jj.o.ascii = true; }
                     else if c == 101 { jj.estatus = true; }
                     else if c == 106 { jj.o.raw = true; jj.o.nonl = true; }
                     else if c == 77 { jj.o.tab = jj.o.tab; }
@@ -475,10 +492,18 @@ fn main(args: utf8<0..1048576> from args, doc: utf8<4294967295> from stdin) -> R
     jj.exitc = 1;
     jj.argtxt = args;
     var rc = parse_opts(args);
+    if jj.o.ascii { jj.o.raw = false; }
     if rc == 0 {
         if jj.nullin {
             if jj.fs < 0 { rc = go(".", "null"); }
             else { rc = go(substr(args, jj.fs, jj.fe - jj.fs), "null"); }
+        } else if jj.slurp {
+            // -s: the one document becomes the only element of an array (no input at all: an empty array); a second value is the usual error
+            if skip_ws(doc, 0) >= len(doc) {
+                if jj.fs < 0 { rc = go(".", "[]"); }
+                else { rc = go(substr(args, jj.fs, jj.fe - jj.fs), "[]"); }
+            } else if jj.fs < 0 { rc = go("[.] | .", doc); }
+            else { rc = go("[.] | (" + substr(args, jj.fs, jj.fe - jj.fs) + ")", doc); }
         } else {
             if jj.fs < 0 { rc = go(".", doc); }
             else { rc = go(substr(args, jj.fs, jj.fe - jj.fs), doc); }
@@ -513,7 +538,7 @@ fn go(filter: text, doc: text) -> i64 {
     if compile(filter) != 0 { return 1; }
     if lower_prog() != 0 { return 1; }
     if jj.dump {
-        dump_program(filter);
+        if jj.explain { explain_program(filter); } else { dump_program(filter); }
         return 0;
     }
     return scan(doc, filter);

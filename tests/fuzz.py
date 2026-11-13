@@ -138,6 +138,11 @@ def gen_s3(r, depth):
     """Stage 3 grammar: reduce/foreach/def/patterns/collectors/math/strings"""
     k = r.random()
     p, q = gen_path(r), gen_path(r)
+    if r.random() < 0.07:
+        return r.choice(["[label $f | %s | (., break $f)]", "[label $f | %s | if . == null then break $f else . end]", "[label $f | (%s), break $f, 5]",
+                         "label $o | foreach %s as $x (0; . + 1; if . > 2 then ., break $o else . end)", "[label $a | (label $b | %s | ., break $b), 1, break $a, 2]",
+                         "[label $a | (label $b | %s | ., break $a), 1]", "[label $f | try (%s | ., break $f) catch .]", "[label $f | (%s | ., break $f)?, 9]",
+                         "[label $f | %s | if type == \"number\" then ., break $f else empty end]", "[label $f | %s | (. as $v | $v, break $f)]"]) % p
     if depth <= 0 or k < 0.1:
         return r.choice([p, "[.[]?]", "[" + p + "]", gen_lit(r)])
     if k < 0.22:
@@ -163,11 +168,63 @@ def gen_s3(r, depth):
     return "%s | %s" % (gen_s3(r, depth - 1), gen_s3(r, depth - 1))
 
 
+MK = ["a", "b", "c"]
+
+
+def gen_mixed_doc(r, depth=3):
+    """values of mixed shapes at the same positions: objects, arrays and scalars side by side"""
+    k = r.random()
+    if depth <= 0 or k < 0.3:
+        return r.choice(["null", "true", "false", "0", "1", "4", "-2", '"s"', '"abc"', "2.5", '""'])
+    if k < 0.65:
+        return "[" + ",".join(gen_mixed_doc(r, depth - 1) for _ in range(r.randint(0, 3))) + "]"
+    return "{" + ",".join('"%s":%s' % (x, gen_mixed_doc(r, depth - 1)) for x in r.sample(MK, r.randint(0, 3))) + "}"
+
+
+def gen_mixed_read(r, depth):
+    """an expression that reads `.` by key, by index, by iteration, with ?, //, type, try, if"""
+    k = r.random()
+    if depth <= 0 or k < 0.3:
+        return r.choice([".a", ".b", ".c", ".[0]", ".[1]", ".[2]", ".a?", ".b?", ".[0]?", ".[1]?", ".[]?", '.["a"]?', ".", "type", "length?"])
+    if k < 0.45:
+        return "%s | %s" % (r.choice([".a", ".b", ".[0]", ".[1]", ".a?", ".[0]?", ".[1]?", ".c?"]), gen_mixed_read(r, depth - 1))
+    if k < 0.55:
+        return "[%s, %s]" % (gen_mixed_read(r, depth - 1), gen_mixed_read(r, depth - 1))
+    if k < 0.63:
+        return "(%s) // (%s)" % (gen_mixed_read(r, depth - 1), gen_mixed_read(r, depth - 1))
+    if k < 0.75:
+        return 'if type == "%s" then %s else %s end' % (r.choice(["object", "array", "number", "null"]), gen_mixed_read(r, depth - 1), gen_mixed_read(r, depth - 1))
+    if k < 0.85:
+        return "try (%s) catch %s" % (gen_mixed_read(r, depth - 1), r.choice(['"e"', "type", ".", "null"]))
+    if k < 0.9:
+        return "(%s)?" % gen_mixed_read(r, depth - 1)
+    if k < 0.95:
+        return "%s, %s" % (gen_mixed_read(r, depth - 1), gen_mixed_read(r, depth - 1))
+    return "[%s]" % gen_mixed_read(r, depth - 1)
+
+
+def gen_mixed(r):
+    doc = gen_mixed_doc(r, r.randint(2, 4))
+    if r.random() < 0.85 and not doc.startswith("["):
+        doc = "[" + doc + "," + gen_mixed_doc(r, 3) + "," + gen_mixed_doc(r, 3) + "]"
+    body = gen_mixed_read(r, r.randint(1, 3))
+    c = r.random()
+    if c < 0.35: pre = ".[]"
+    elif c < 0.5: pre = ".[]?"
+    elif c < 0.6: pre = ".[] | .[]?"
+    elif c < 0.65: pre = ".[0]?"
+    elif c < 0.8: pre = ".[]? | .[]?"
+    elif c < 0.9: pre = ".[1]?"
+    else: pre = "."
+    return doc, "%s | %s" % (pre, body) if pre != "." else body
+
+
 GRAMMAR = os.environ.get('JXFUZZ_GRAMMAR', 'base')
 
 
 def make_case(seed, i):
     r = random.Random(seed * 1000003 + i)
+    if GRAMMAR == 'mixed': return gen_mixed(r)
     if GRAMMAR == 's3': return gen_doc(r), gen_s3(r, r.randint(1, 3))
     return gen_doc(r), gen_expr(r, r.randint(1, 3))
 
@@ -208,7 +265,7 @@ def main():
     ap.add_argument("--jq", default="C:/ProgramData/chocolatey/lib/jq/tools/jq.exe")
     ap.add_argument("--count", type=int, default=500)
     ap.add_argument("--seeds", default="1,2,3,4")
-    ap.add_argument("--grammar", choices=["base", "s3"], default="base", help="s3: the Stage 3 grammar (reduce/foreach/def/patterns/collectors/math/strings)")
+    ap.add_argument("--grammar", choices=["base", "s3", "mixed"], default="base", help="s3: the Stage 3 grammar (reduce/foreach/def/patterns/collectors/math/strings)")
     ap.add_argument("--only", type=int, default=None)
     ap.add_argument("--show", type=int, default=12)
     a = ap.parse_args()

@@ -1,0 +1,390 @@
+### .
+filter .
+automaton
+  n0   .                            slot
+root  entry 0001  input r4
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  MOV       0, 4, 0, 0               ; col 0
+  0002  PRINT     0, 0, 0, 0               ; col 0
+  0003  RET       0, 0, 0, 0               ; col 0
+### .a.b
+filter .a.b
+automaton
+  n0   .                           
+  n1   .a                          
+  n2   .a.b                         slot
+root  entry 0001  input r4
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  PRNN      0, 2, 0, 0               ; col 2  print .a.b (n2)
+  0002  RET       0, 0, 0, 0               ; col 2
+### .users[0].n
+filter .users[0].n
+automaton
+  n0   .                           
+  n1   .users                      
+  n2   .users[0]                   
+  n3   .users[0].n                  slot
+root  entry 0001  input r4
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  PRNN      0, 3, 0, 0               ; col 9  print .users[0].n (n3)
+  0002  RET       0, 0, 0, 0               ; col 9
+### .users[]
+filter .users[]
+automaton
+  n0   .                            streamed
+  n1   .users                       slot iterates(n2) streamed
+  n2   .users[]                     slot unit(scope 0) in(n2) streamed
+scope 0  iter n2 .users[]  term print  entry 0003  input r0  ; runs at the end of each element
+root  entry 0001  input r8
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  PLAYC     0, 0, 0, 0               ; col 7
+  0002  RET       0, 0, 0, 0               ; col 7
+  0003  PRINT     0, 0, 0, 0               ; col 0
+  0004  RET       0, 0, 0, 0               ; col 0
+### .users[] | .addr.city
+filter .users[] | .addr.city
+automaton
+  n0   .                            streamed
+  n1   .users                       slot iterates(n2) streamed
+  n2   .users[]                     unit(scope 0) in(n2) streamed
+  n3   .users[].addr                in(n2)
+  n4   .users[].addr.city           slot in(n2)
+scope 0  iter n2 .users[]  term print  entry 0003  input r4  ; runs at the end of each element
+root  entry 0001  input r9
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  PLAYC     0, 0, 0, 0               ; col 9
+  0002  RET       0, 0, 0, 0               ; col 9
+  0003  PRNN      0, 4, 0, 0               ; col 16  print .users[].addr.city (n4)
+  0004  RET       0, 0, 0, 0               ; col 16
+### .users[] | select(.age >= 85) | .n
+filter .users[] | select(.age >= 85) | .n
+automaton
+  n0   .                            streamed
+  n1   .users                       slot iterates(n2) streamed
+  n2   .users[]                     unit(scope 0) in(n2) streamed
+  n3   .users[].age                 slot in(n2)
+  n4   .users[].n                   slot in(n2)
+scope 0  iter n2 .users[]  term print  entry 0003  input r4  ; runs at the end of each element
+root  entry 0001  input r9
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  PLAYC     0, 0, 0, 0               ; col 9
+  0002  RET       0, 0, 0, 0               ; col 9
+  0003  JNCL      16, 3, 0, 11             ; col 11
+  0004  MOV       10, 4, 0, 0              ; col 0
+  0005  PRNN      0, 4, 0, 0               ; col 32  print .users[].n (n4)
+  0006  RET       0, 0, 0, 0               ; col 32
+### {n: .n, c: .addr.city}
+filter {n: .n, c: .addr.city}
+automaton
+  n0   .                           
+  n1   .n                           slot
+  n2   .addr                       
+  n3   .addr.city                   slot
+root  entry 0001  input r4
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  OUTB      0, 2, 0, 0               ; col 0
+  0002  OUTK      0, 11, 0, 0              ; col 0
+  0003  OUTN      0, 1, 0, 0               ; col 0
+  0004  OUTK      0, 12, 1, 0              ; col 0
+  0005  OUTN      0, 3, 0, 0               ; col 0
+  0006  OUTE      0, 0, 0, 0               ; col 0
+  0007  RET       0, 0, 0, 0               ; col 0
+### [.users[] | .n]
+filter [.users[] | .n]
+automaton
+  n0   .                            streamed
+  n1   .users                       slot iterates(n2) streamed
+  n2   .users[]                     unit(scope 0) in(n2) streamed
+  n3   .users[].n                   slot in(n2)
+scope 0  iter n2 .users[]  term list  entry 0004  input r4  ; runs at the end of each element
+root  entry 0001  input r9
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  ARRS      5, 0, 0, 0               ; col 0
+  0002  PRINT     5, 0, 0, 0               ; col 0
+  0003  RET       0, 0, 0, 0               ; col 0
+  0004  LOADN     0, 3, 0, 0               ; col 12  r0 = .users[].n (n3)
+  0005  APPR      0, 0, 0, 0               ; col 0
+  0006  RET       0, 0, 0, 0               ; col 0
+### .users | map(.age) | add
+filter .users | map(.age) | add
+automaton
+  n0   .                            streamed
+  n1   .users                       slot iterates(n2) streamed
+  n2   .users[]                     unit(scope 0) in(n2) streamed
+  n3   .users[].age                 slot in(n2)
+scope 0  iter n2 .users[]  term add  entry 0005  input r4  ; runs at the end of each element
+root  entry 0001  input r9
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  LOADN     10, 1, 0, 0              ; col 0  r10 = .users (n1)
+  0002  FOLDS     5, 0, 1, 0               ; col 9
+  0003  PRINT     5, 0, 0, 0               ; col 0
+  0004  RET       0, 0, 0, 0               ; col 0
+  0005  LOADN     0, 3, 0, 0               ; col 13  r0 = .users[].age (n3)
+  0006  FOLDA     0, 0, 0, 0               ; col 0
+  0007  RET       0, 0, 0, 0               ; col 0
+### .users | length
+filter .users | length
+automaton
+  n0   .                           
+  n1   .users                       slot
+root  entry 0001  input r4
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  LOADN     5, 1, 0, 0               ; col 0  r5 = .users (n1)
+  0002  FN        0, 5, 0, 1               ; col 9
+  0003  PRINT     0, 0, 0, 0               ; col 0
+  0004  RET       0, 0, 0, 0               ; col 0
+### reduce .users[] as $u (0; . + $u.age)
+filter reduce .users[] as $u (0; . + $u.age)
+automaton
+  n0   .                            streamed
+  n1   .users                       slot iterates(n2) streamed
+  n2   .users[]                     slot unit(scope 0) in(n2) streamed
+scope 0  iter n2 .users[]  term list  entry 0028  input r0  ; runs at the end of each element
+root  entry 0001  input r8
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  LDI       9, 11, 0, 0              ; col 23
+  0002  MOV       10, 9, 0, 0              ; col 0
+  0003  MOV       11, 8, 0, 0              ; col 0
+  0004  GOSUB     0, 0, 8, 0               ; col 14  to 8
+  0005  MOV       4, 10, 0, 0              ; col 0
+  0006  PRINT     4, 0, 0, 0               ; col 0
+  0007  RET       0, 0, 0, 0               ; col 0
+  0008  PLAYB     12, 0, 0, 0              ; col 14
+  0009  LISTN     12, 13, 12, 0            ; col 14
+  0010  GOSUB     0, 0, 14, 0              ; col 0  to 14
+  0011  JMP       0, 0, 9, 0               ; col 14  to 9
+  0012  PLAYE     0, 0, 0, 0               ; col 14
+  0013  RET       0, 0, 0, 0               ; col 14
+  0014  MOV       14, 13, 0, 0             ; col 0
+  0015  LDI       16, 0, 0, 0              ; col 0
+  0016  MOV       19, 10, 0, 0             ; col 0
+  0017  GOSUB     0, 0, 23, 0              ; col 28  to 23
+  0018  JZ        16, 0, 21, 0             ; col 0  to 21
+  0019  MOV       10, 17, 0, 0             ; col 0
+  0020  RET       0, 0, 0, 0               ; col 0
+  0021  LDI       10, 1, 0, 0              ; col 0
+  0022  RET       0, 0, 0, 0               ; col 0
+  0023  FIELD     20, 14, 6, 3             ; col 32
+  0024  ARITH     15, 19, 20, 21           ; col 28
+  0025  MOV       17, 15, 0, 0             ; col 0
+  0026  LDI       16, 1, 0, 0              ; col 0
+  0027  RET       0, 0, 0, 0               ; col 0
+  0028  APPR      1, 0, 0, 0               ; col 0
+  0029  RET       0, 0, 0, 0               ; col 0
+### .users | group_by(.age) | length
+filter .users | group_by(.age) | length
+automaton
+  n0   .                            streamed
+  n1   .users                       slot iterates(n2) streamed
+  n2   .users[]                     unit(scope 0) in(n2) streamed
+  n3   .users[].age                 slot in(n2)
+scope 0  iter n2 .users[]  term list  entry 0007  input r4  ; runs at the end of each element
+root  entry 0001  input r9
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  LOADN     10, 1, 0, 0              ; col 0  r10 = .users (n1)
+  0002  ARRS      12, 0, 0, 0              ; col 994
+  0003  FN2       11, 10, 12, 112          ; col 979
+  0004  FN        5, 11, 0, 1              ; col 26
+  0005  PRINT     5, 0, 0, 0               ; col 0
+  0006  RET       0, 0, 0, 0               ; col 0
+  0007  REGCLR    1, 0, 0, 0               ; col 998
+  0008  MOV       17, 4, 0, 0              ; col 0
+  0009  GOSUB     0, 0, 13, 0              ; col 18  to 13
+  0010  REGLIST   0, 1, 0, 0               ; col 998
+  0011  APPR      0, 0, 0, 0               ; col 0
+  0012  RET       0, 0, 0, 0               ; col 0
+  0013  LOADN     13, 3, 0, 0              ; col 18  r13 = .users[].age (n3)
+  0014  APPR      1, 13, 0, 1              ; col 998
+  0015  RET       0, 0, 0, 0               ; col 998
+### label $out | .users[] | if .age > 50 then break $out else .n end
+filter label $out | .users[] | if .age > 50 then break $out else .n end
+automaton
+  n0   .                            streamed
+  n1   .users                       slot iterates(n2) streamed
+  n2   .users[]                     slot unit(scope 0) in(n2) streamed
+scope 0  iter n2 .users[]  term list  entry 0031  input r0  ; runs at the end of each element
+root  entry 0001  input r8
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  MOV       13, 8, 0, 0              ; col 0
+  0002  GOSUBC    0, 0, 4, 0               ; col 0  to 4
+  0003  RET       0, 0, 0, 0               ; col 0
+  0004  PLAYB     14, 0, 0, 0              ; col 20
+  0005  LISTN     14, 15, 8, 0             ; col 20
+  0006  GOSUB     0, 0, 10, 0              ; col 24  to 10
+  0007  JMP       0, 0, 5, 0               ; col 20  to 5
+  0008  PLAYE     0, 0, 0, 0               ; col 20
+  0009  RET       0, 0, 0, 0               ; col 20
+  0010  FIELD     16, 15, 8, 3             ; col 27
+  0011  LDI       17, 11, 0, 0             ; col 34
+  0012  CMP       18, 16, 17, 15           ; col 32
+  0013  JF        18, 0, 16, 0             ; col 24  to 16
+  0014  MOV       19, 15, 0, 0             ; col 0
+  0015  JMP       0, 0, 23, 0              ; col 42  to 23
+  0016  MOV       20, 15, 0, 0             ; col 0
+  0017  FIELD     9, 20, 11, 1             ; col 58
+  0018  MOV       4, 9, 0, 0               ; col 0
+  0019  GOSUB     0, 0, 21, 0              ; col 0  to 21
+  0020  RET       0, 0, 0, 0               ; col 0
+  0021  PRINT     4, 0, 0, 0               ; col 0
+  0022  RET       0, 0, 0, 0               ; col 0
+  0023  OBJB      21, 0, 0, 0              ; col 42
+  0024  LDI       22, 12, 0, 0             ; col 42
+  0025  OBJCK     22, 0, 0, 0              ; col 42
+  0026  LDI       23, 13, 0, 0             ; col 0
+  0027  OBJP      21, 22, 23, 0            ; col 42
+  0028  RAISE     21, 0, 0, 0              ; col 42
+  0029  MOV       9, 21, 0, 0              ; col 0
+  0030  JMP       0, 0, 18, 0              ; col 0  to 18
+  0031  APPR      0, 0, 0, 0               ; col 0
+  0032  RET       0, 0, 0, 0               ; col 0
+### [.[] | .a?, .[0]?]
+filter [.[] | .a?, .[0]?]
+automaton
+  n0   .                            slot iterates(n1) streamed
+  n1   []                           unit(scope 0) in(n1) streamed
+  n2   [].a                         slot in(n1)
+  n3   [][0]                        slot in(n1)
+scope 0  iter n1 []  term list  entry 0004  input r4  ; runs at the end of each element
+root  entry 0001  input r9
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  ARRS      5, 0, 0, 0               ; col 0
+  0002  PRINT     5, 0, 0, 0               ; col 0
+  0003  RET       0, 0, 0, 0               ; col 0
+  0004  MOV       10, 4, 0, 0              ; col 0
+  0005  GOSUB     0, 0, 20, 0              ; col 9  to 20
+  0006  MOV       11, 4, 0, 0              ; col 0
+  0007  TRYB      0, 8, 0, 0               ; col 16  to 0
+  0008  MOV       16, 11, 0, 0             ; col 0
+  0009  GOSUB     0, 0, 12, 0              ; col 15  to 12
+  0010  POPF      0, 0, 0, 0               ; col 16
+  0011  RET       0, 0, 0, 0               ; col 16
+  0012  LOADN     12, 3, 0, 0              ; col 15  r12 = [][0] (n3)
+  0013  GUARD     0, 8, 0, 0               ; col 16
+  0014  MOV       0, 12, 0, 0              ; col 0
+  0015  GOSUB     0, 0, 18, 0              ; col 0  to 18
+  0016  POPF      0, 0, 0, 0               ; col 16
+  0017  RET       0, 0, 0, 0               ; col 16
+  0018  APPR      0, 0, 0, 0               ; col 0
+  0019  RET       0, 0, 0, 0               ; col 0
+  0020  TRYB      0, 4, 0, 0               ; col 9  to 0
+  0021  MOV       21, 10, 0, 0             ; col 0
+  0022  GOSUB     0, 0, 25, 0              ; col 7  to 25
+  0023  POPF      0, 0, 0, 0               ; col 9
+  0024  RET       0, 0, 0, 0               ; col 9
+  0025  LOADN     17, 2, 0, 0              ; col 7  r17 = [].a (n2)
+  0026  GUARD     0, 4, 0, 0               ; col 9
+  0027  MOV       0, 17, 0, 0              ; col 0
+  0028  GOSUB     0, 0, 18, 0              ; col 0  to 18
+  0029  POPF      0, 0, 0, 0               ; col 9
+  0030  RET       0, 0, 0, 0               ; col 9
+### limit(2; .users[])
+filter limit(2; .users[])
+automaton
+  n0   .                            streamed
+  n1   .users                       slot iterates(n2) streamed
+  n2   .users[]                     slot unit(scope 0) in(n2) streamed
+scope 0  iter n2 .users[]  term list  entry 0020  input r0  ; runs at the end of each element
+root  entry 0001  input r8
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  LDI       9, 11, 0, 0              ; col 6
+  0002  LIMI      13, 9, 6, 4              ; col 0
+  0003  LDI       11, 0, 0, 0              ; col 0
+  0004  MOV       14, 8, 0, 0              ; col 0
+  0005  GOSUBC    0, 4, 7, 0               ; col 0  to 7
+  0006  RET       0, 0, 0, 0               ; col 0
+  0007  PLAYB     15, 0, 0, 0              ; col 16
+  0008  LISTN     15, 10, 11, 0            ; col 16
+  0009  GOSUB     0, 0, 13, 0              ; col 0  to 13
+  0010  JMP       0, 0, 8, 0               ; col 16  to 8
+  0011  PLAYE     0, 0, 0, 0               ; col 16
+  0012  RET       0, 0, 0, 0               ; col 16
+  0013  INC       11, 0, 0, 0              ; col 0
+  0014  MOV       4, 10, 0, 0              ; col 0
+  0015  GOSUB     0, 0, 18, 0              ; col 0  to 18
+  0016  JLT       11, 13, 0, 0             ; col 0  to 0
+  0017  STOP      0, 4, 0, 0               ; col 0
+  0018  PRINT     4, 0, 0, 0               ; col 0
+  0019  RET       0, 0, 0, 0               ; col 0
+  0020  APPR      0, 0, 0, 0               ; col 0
+  0021  RET       0, 0, 0, 0               ; col 0
+### try .a catch 0
+filter try .a catch 0
+automaton
+  n0   .                           
+  n1   .a                           slot
+root  entry 0001  input r4
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  TRYB      0, 3, 6, 0               ; col 0  to 6
+  0002  MOV       9, 4, 0, 0               ; col 0
+  0003  GOSUB     0, 0, 11, 0              ; col 4  to 11
+  0004  POPF      0, 0, 0, 0               ; col 0
+  0005  RET       0, 0, 0, 0               ; col 0
+  0006  LDERR     10, 0, 0, 0              ; col 0
+  0007  MOV       11, 10, 0, 0             ; col 0
+  0008  LDI       0, 11, 0, 0              ; col 13
+  0009  PRINT     0, 0, 0, 0               ; col 0
+  0010  RET       0, 0, 0, 0               ; col 0
+  0011  LOADN     5, 1, 0, 0               ; col 4  r5 = .a (n1)
+  0012  GUARD     0, 3, 0, 0               ; col 0
+  0013  MOV       0, 5, 0, 0               ; col 0
+  0014  GOSUB     0, 0, 9, 0               ; col 0  to 9
+  0015  POPF      0, 0, 0, 0               ; col 0
+  0016  RET       0, 0, 0, 0               ; col 0
+### .a as [$x, $y] | $x
+filter .a as [$x, $y] | $x
+automaton
+  n0   .                           
+  n1   .a                           slot
+  n2   .a[0]                        slot
+  n3   .a[1]                        slot
+root  entry 0001  input r4
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  LOADN     5, 1, 0, 0               ; col 0  r5 = .a (n1)
+  0002  MOV       6, 5, 0, 0               ; col 3
+  0003  MOV       7, 4, 0, 0               ; col 0
+  0004  IDX       8, 6, 0, 0               ; col 8
+  0005  MOV       9, 8, 0, 0               ; col 3
+  0006  MOV       10, 7, 0, 0              ; col 0
+  0007  IDX       11, 6, 1, 0              ; col 12
+  0008  MOV       12, 11, 0, 0             ; col 3
+  0009  MOV       13, 10, 0, 0             ; col 0
+  0010  MOV       0, 9, 0, 0               ; col 0
+  0011  PRINT     0, 0, 0, 0               ; col 0
+  0012  RET       0, 0, 0, 0               ; col 0
+### def f(g): g | length; f(.users)
+filter def f(g): g | length; f(.users)
+automaton
+  n0   .                           
+  n1   .users                       slot
+root  entry 0001  input r4
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  LOADN     5, 1, 0, 0               ; col 24  r5 = .users (n1)
+  0002  FN        0, 5, 0, 1               ; col 14
+  0003  PRINT     0, 0, 0, 0               ; col 0
+  0004  RET       0, 0, 0, 0               ; col 0
+### "x\(.a)y"
+filter "x\(.a)y"
+automaton
+  n0   .                           
+  n1   .a                           slot
+root  entry 0001  input r4
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  LDI       5, 11, 0, 0              ; col 0
+  0002  LOADN     6, 1, 0, 0               ; col 4  r6 = .a (n1)
+  0003  FN        7, 6, 0, 7               ; col 0
+  0004  ARITH     8, 5, 7, 21              ; col 0
+  0005  LDI       9, 12, 0, 0              ; col 0
+  0006  ARITH     0, 8, 9, 21              ; col 0
+  0007  PRINT     0, 0, 0, 0               ; col 0
+  0008  RET       0, 0, 0, 0               ; col 0
+### .a | ascii_downcase
+filter .a | ascii_downcase
+automaton
+  n0   .                           
+  n1   .a                           slot
+root  entry 0001  input r4
+  0000  RET       0, 0, 0, 0               ; col 0
+  0001  LOADN     5, 1, 0, 0               ; col 0  r5 = .a (n1)
+  0002  FN        0, 5, 0, 26              ; col 5
+  0003  PRINT     0, 0, 0, 0               ; col 0
+  0004  RET       0, 0, 0, 0               ; col 0

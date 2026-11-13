@@ -10,7 +10,43 @@ fn newline_indent(depth: i64) {
 
 // write t to the output, or to the scratch string while a number is being turned into a string
 fn ow(t: text) {
-    if jj.o.to == 0 { jj.o.text += t; } else { jj.ev.scr += t; }
+    if jj.o.to == 0 {
+        if jj.o.ascii { ow_ascii(t); } else { jj.o.text += t; }
+    } else { jj.ev.scr += t; }
+}
+
+// -a: every character above 127 as a backslash-u escape (a pair for one above U+FFFF), like jq's ASCII output
+fn ow_ascii(t: text) {
+    var i = 0;
+    var rs = 0;
+    let n = len(t);
+    while i < n {
+        let c = byte_at(t, i);
+        if c < 128 { i += 1; continue; }
+        if i > rs { jj.o.text += substr(t, rs, i - rs); }
+        var cp = c;
+        var k = 1;
+        if c >= 240 { cp = c & 7; k = 4; } else if c >= 224 { cp = c & 15; k = 3; } else if c >= 192 { cp = c & 31; k = 2; }
+        var j = 1;
+        while j < k { cp = (cp << 6) | (byte_at(t, i + j) & 63); j += 1; }
+        if cp >= 65536 {
+            let v = cp - 65536;
+            ow_u4(55296 + (v >> 10));
+            ow_u4(56320 + (v & 1023));
+        } else { ow_u4(cp); }
+        i += k;
+        rs = i;
+    }
+    if i > rs { jj.o.text += substr(t, rs, i - rs); }
+}
+
+fn ow_u4(v: i64) {
+    jj.o.text += "\\u";
+    var sh = 12;
+    while sh >= 0 {
+        jj.o.text += substr("0123456789abcdef", (v >> sh) & 15, 1);
+        sh -= 4;
+    }
 }
 
 // append the byte run to a destination (see put in eval.mito)

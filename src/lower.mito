@@ -274,6 +274,7 @@ fn lx(e: i64, vin: i64, dst: i64) -> i64 {
         emit(Op.MOV, var_reg(jj.f.ac[e]), x, 0, 0, pos);
         return lx(jj.f.ab[e], vin, dst);
     }
+    if k == K.BREAK { return lx(jj.f.aa[e], vin, dst); }
     if k == K.ERROR {
         let x = lx(jj.f.aa[e], vin, -1);
         emit(Op.RAISE, x, 0, 0, 0, pos);
@@ -415,6 +416,20 @@ fn lower_block(h: i64, t: i64) {
         return;
     }
     if k == K.EMPTY { emit(Op.RET, 0, 0, 0, 0, pos); return; }
+    if k == K.LABEL {
+        // the body runs in a frame that catches the stop of `break`; its outputs go on to the next node, and when the frame
+        // is stopped the label ends (the instruction after the call returns)
+        check_depth(t);
+        let ft = new_frame(15, e, t);
+        let r = succ_reg(jj.f.aa[e], ft);
+        emit(Op.MOV, r, x, 0, 0, pos);
+        let hh = head(jj.f.aa[e]);
+        queue_block(hh, ft);
+        let i = emit(Op.GOSUBC, 0, e, 0, 0, pos);
+        fixup(i, 0, hh);
+        emit(Op.RET, 0, 0, 0, 0, pos);
+        return;
+    }
     if k == K.COMMA {
         goto_node(jj.f.aa[e], x, t, Op.GOSUB);
         goto_node(jj.f.ab[e], x, t, Op.JMP);
@@ -710,6 +725,11 @@ fn lower_term(t: i64) {
     if kind == 10 {
         emit(Op.LDI, tc, 1, 0, 0, pos);
         emit(Op.STOP, 0, own, 0, 0, pos);
+        return;
+    }
+    if kind == 15 {
+        goto_node(nxt, h, par, Op.GOSUB);
+        emit(Op.RET, 0, 0, 0, 0, pos);
         return;
     }
     if kind == 14 {

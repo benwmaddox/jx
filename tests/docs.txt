@@ -46,3 +46,7 @@ true
 {}
 ### longstr
 {"users":[{"n":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","age":99}],"k":"k"}
+### mixed_shapes
+[{"a":1,"b":[7]},[4,5],3,null,{"a":[9]},[{"a":1},[2]],"s"]
+### mixed_objs
+[{"a":1},[4],{"a":{"b":2}},[[5]],{"b":3}]

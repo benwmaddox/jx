@@ -12,6 +12,7 @@ const K {
     ALT: i64 = 9; BIN: i64 = 10; AND: i64 = 11; OR: i64 = 12; NEG: i64 = 13; IF: i64 = 14; ARR: i64 = 15; OBJ: i64 = 16;
     FN: i64 = 17; SELECT: i64 = 18; EMPTY: i64 = 19; CMPLIT: i64 = 20; FOLD: i64 = 21; PLAY: i64 = 22;
     TRY: i64 = 23; VAR: i64 = 24; AS: i64 = 25; VARBIND: i64 = 26; REDUCE: i64 = 27; RBIND: i64 = 28; RANGE: i64 = 29;
+    LABEL: i64 = 37; BREAK: i64 = 38;
     LIMIT: i64 = 30; UNTIL: i64 = 31; ERROR: i64 = 32; SLICE: i64 = 33; FOREACH: i64 = 34; FBIND: i64 = 35; DIDX: i64 = 36;
 }
 
@@ -433,7 +434,8 @@ fn parse_postfix(f: text, t0: i64) -> i64 {
         if c == 63 {
             // `E?` catches the errors of the last step only: `.a.b?` is `.a | (.b)?`
             let tk = jj.f.ak[t];
-            if (tk == K.FIELD || tk == K.IDX || tk == K.ITER || tk == K.SLICE || tk == K.DIDX) && jj.f.ak[jj.f.aa[t]] != K.ID {
+            // (but `(.a.b)?` catches the whole path: a parenthesized term is one term)
+            if (tk == K.FIELD || tk == K.IDX || tk == K.ITER || tk == K.SLICE || tk == K.DIDX) && jj.f.ak[jj.f.aa[t]] != K.ID && t != jj.paren_node {
                 let src = jj.f.aa[t];
                 let st = mk(tk, mk(K.ID, 0, 0, 0, q), jj.f.ab[t], jj.f.ac[t], q);
                 if st < 0 { return -1; }
@@ -975,7 +977,6 @@ fn parse_pat(f: text, t: i64, depth: i64) -> bool {
     if depth >= 8 { rej1("a pattern nested more than 8 levels", jj.cp); return false; }
     var q = skip_ws(f, jj.cp);
     let c = byte_at(f, q);
-    if depth >= 1 && (c == 91 || c == 123) { jj.pat_nest = true; }
     if c == 36 {
         var e = q + 1;
         while is_name_char(byte_at(f, e)) { e += 1; }
@@ -1146,12 +1147,10 @@ fn parse_as_pattern(f: text, lhs: i64, q0: i64) -> i64 {
     let lo = jj.pbn;
     var npat = 0;
     var q2 = 0;
-    jj.pat_nest = false;
     while true {
         if npat >= 8 { return rej1("more than 8 destructuring alternatives", jj.cp); }
         jj.alt_s[npat] = jj.f.nvar;
         jj.alt_b[npat] = jj.pbn;
-        jj.alt_k[npat] = byte_at(f, skip_ws(f, jj.cp));
         if !parse_pat(f, t, 0) { return -1; }
         jj.alt_e[npat] = jj.f.nvar;
         jj.alt_be[npat] = jj.pbn;
@@ -1164,16 +1163,6 @@ fn parse_as_pattern(f: text, lhs: i64, q0: i64) -> i64 {
     jj.cp = q2 + 1;
     if npat > 1 {
         if jj.noas != 0 { return rej1("destructuring alternatives `?//` here", q2); }
-        // alternatives that read keys and indexes of the same value are not exact in the streaming engine (README, known issues)
-        var ia = 0;
-        var has_arr = false;
-        var has_obj = false;
-        while ia < npat {
-            if jj.alt_k[ia] == 91 { has_arr = true; }
-            if jj.alt_k[ia] == 123 { has_obj = true; }
-            ia += 1;
-        }
-        if (has_arr && has_obj) || jj.pat_nest { return rej1("destructuring alternatives `?//` that mix array and object patterns or nest patterns", q2); }
         let r = parse_alternatives(f, lhs, t, npat, q0);
         jj.f.nvar = save;
         jj.pbn = lo;
@@ -1376,6 +1365,7 @@ fn parse_primary(f: text) -> i64 {
         let q2 = skip_ws(f, jj.cp);
         if byte_at(f, q2) != 41 { syntax("expected )", q2); return -1; }
         jj.cp = q2 + 1;
+        jj.paren_node = e;
         return e;
     }
     if c == 91 {
@@ -1417,7 +1407,7 @@ fn parse_primary(f: text) -> i64 {
         if w == "false" { return mk(K.LIT, jj.ev.hfalse, 0, 0, q); }
         if w == "null" { return mk(K.LIT, jj.ev.hnull, 0, 0, q); }
         if w == "if" { return parse_if(f, q); }
-        if w != "try" && w != "reduce" && w != "foreach" && w != "def" && w != "label" {
+        if w != "try" && w != "reduce" && w != "foreach" && w != "def" && w != "label" && w != "break" {
             let uc = user_call(f, q, e);
             if uc != -2 { return uc; }
         }
@@ -1465,6 +1455,66 @@ fn parse_primary(f: text) -> i64 {
                 if h < 0 { return -1; }
             }
             return mk(K.TRY, b, h, 0, q);
+        }
+        if w == "label" || w == "break" {
+            // `label $name | body` (the body is the rest of the pipe) and `break $name`: a label is a variable slot, so a body that breaks to
+            // an outer label cannot be streamed (the unit that runs it could not stop the generator outside)
+            let ql = skip_ws(f, jj.cp);
+            if byte_at(f, ql) != 36 { return syn1("expected `$name` after `" + w + "`", ql); }
+            let ns = ql + 1;
+            var ne = ns;
+            while is_name_char(byte_at(f, ne)) { ne += 1; }
+            if ne == ns { return syn1("a label name is needed after `$`", ns); }
+            let lname = substr(f, ns, ne - ns);
+            if w == "break" {
+                var li = jj.nlab - 1;
+                while li >= 0 {
+                    if jj.lab_len[li] == ne - ns && substr(jj.f.keys, jj.lab_off[li], jj.lab_len[li]) == lname {
+                        // jq's break is `error({"__jq": N})`, N the number of the label: a try catches it, the label frame resumes on it
+                        let lo = len(jj.f.lits);
+                        jj.f.lits += "__jq";
+                        let kk = mk(K.LIT, new_const(5, 1, lo, 4), 0, 0, q);
+                        let vv = const_num(jj.f.ad[jj.lab_node[li]]);
+                        if kk < 0 || vv < 0 { return -1; }
+                        if jj.f.nobj >= 255 { jj.err = "jx: too many object entries in the filter"; return -1; }
+                        let first = jj.f.nobj;
+                        jj.f.okey[first] = kk;
+                        jj.f.oval[first] = vv;
+                        jj.f.nobj += 1;
+                        let ob = mk(K.OBJ, first, 1, 0, q);
+                        if ob < 0 { return -1; }
+                        let er = mk(K.ERROR, ob, 0, 0, q);
+                        if er < 0 { return -1; }
+                        let bn = mk(K.BREAK, er, -1, jj.lab_slot[li], q);
+                        if bn < 0 { return -1; }
+                        jj.cp = ne;
+                        return bn;
+                    }
+                    li -= 1;
+                }
+                return syn1("$*label-" + lname + " is not defined", q);
+            }
+            if jj.nlab >= 16 { return rej1("more than 16 labels nested", q); }
+            let sl = new_slot();
+            if sl < 0 { return -1; }
+            let qb = skip_ws(f, ne);
+            if byte_at(f, qb) != 124 { return syn1("expected `|` after the label", qb); }
+            let ln = mk(K.LABEL, -1, -1, sl, q);
+            if ln < 0 { return -1; }
+            jj.f.ad[ln] = jj.lab_count;
+            jj.lab_count += 1;
+            jj.lab_off[jj.nlab] = len(jj.f.keys);
+            jj.lab_len[jj.nlab] = ne - ns;
+            jj.lab_slot[jj.nlab] = sl;
+            jj.lab_node[jj.nlab] = ln;
+            jj.f.keys += lname;
+            jj.nlab += 1;
+            jj.cp = qb + 1;
+            let lb = parse_expr(f, 1);
+            jj.nlab -= 1;
+            if lb < 0 { return -1; }
+            jj.f.aa[ln] = lb;
+            return ln;
         }
         if w == "error" {
             let q2 = skip_ws(f, jj.cp);
@@ -1740,7 +1790,7 @@ fn cls(e: i64) -> i64 {
     if k == K.ITER || k == K.COMMA { return 2; }
     if k == K.PLAY || k == K.FOREACH { return 2; }
     if k == K.EMPTY || k == K.SELECT { return 1; }
-    if k == K.TRY || k == K.RANGE { return 2; }
+    if k == K.TRY || k == K.RANGE || k == K.LABEL { return 2; }
     if k == K.LIMIT { if j_lim3(e) { return 0; } return 2; }
     if k == K.AS {
         let a = cls(jj.f.aa[e]);
@@ -1906,7 +1956,8 @@ fn an_scope(root: i64, it: i64, ctx: i64, nxt: i64, body0: i64, term: i64) -> i6
 fn walk_vars(e: i64) {
     if e < 0 { return; }
     let k = jj.f.ak[e];
-    if k == K.VAR { jj.wv_used = jj.wv_used | (1 << jj.f.ac[e]); return; }
+    if k == K.VAR || k == K.BREAK { jj.wv_used = jj.wv_used | (1 << jj.f.ac[e]); return; }
+    if k == K.LABEL { jj.wv_bound = jj.wv_bound | (1 << jj.f.ac[e]); walk_vars(jj.f.aa[e]); return; }
     if k == K.ID || k == K.LIT || k == K.NODE || k == K.EMPTY || k == K.CMPLIT || k == K.PLAY || k == K.VARBIND || k == K.RBIND || k == K.FBIND { return; }
     if k == K.OBJ {
         var i = 0;
@@ -1956,6 +2007,10 @@ fn an(e: i64, ctx: i64, nxt: i64, direct: bool) -> i64 {
     if k == K.ID { want_node(ctx); return ctx; }
     if k == K.NODE { return jj.f.aa[e]; }
     if k == K.LIT || k == K.EMPTY { return -1; }
+    if k == K.BREAK {
+        if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
+        return -1;
+    }
     if k == K.FIELD || k == K.IDX {
         let src = jj.f.aa[e];
         if cls(src) != 0 {
@@ -2246,6 +2301,10 @@ fn an(e: i64, ctx: i64, nxt: i64, direct: bool) -> i64 {
     if k == K.TRY {
         if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
         if jj.f.ab[e] >= 0 { if an(jj.f.ab[e], -1, nxt, false) == -2 { return -2; } }
+        return -1;
+    }
+    if k == K.LABEL {
+        if an(jj.f.aa[e], ctx, -1, false) == -2 { return -2; }
         return -1;
     }
     if k == K.ERROR {

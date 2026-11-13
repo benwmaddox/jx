@@ -104,3 +104,108 @@ fn dump_program(filter: text) {
         i += 1;
     }
 }
+
+// ---- --explain: the automaton, the scopes and the program in readable form (docs/bytecode-design.md, 4.10) ----
+
+// the text of the child edge from node p to node c: `.name`, `["name"]`, `[3]` or `[]`
+fn edge_text(p: i64, c: i64) -> text {
+    if jj.f.niter[p] == c { return "[]"; }
+    var e = jj.f.nfirst[p];
+    while e != 0 {
+        if jj.f.enode[e] == c {
+            if jj.f.ekind[e] == 1 { return "[" + str(jj.f.ea[e]) + "]"; }
+            let k = substr(jj.f.keys, jj.f.ea[e], jj.f.eb[e]);
+            var plain = jj.f.eb[e] > 0;
+            var i = 0;
+            while i < jj.f.eb[e] {
+                let ch = byte_at(k, i);
+                if !((ch >= 97 && ch <= 122) || (ch >= 65 && ch <= 90) || ch == 95 || (i > 0 && ch >= 48 && ch <= 57)) { plain = false; }
+                i += 1;
+            }
+            if plain { return "." + k; }
+            return "[" + chr(34) + k + chr(34) + "]";
+        }
+        e = jj.f.enext[e];
+    }
+    return "?";
+}
+
+// the path of an automaton node from the document: `.`, `.users`, `.users[]`, `.users[].addr.city`
+fn node_path(n: i64) -> text {
+    if n <= 0 { return "."; }
+    return node_path_below(n);
+}
+
+fn node_path_below(n: i64) -> text {
+    let p = jj.f.par[n];
+    if p <= 0 { return edge_text(0, n); }
+    return node_path_below(p) + edge_text(p, n);
+}
+
+fn term_name(t: i64) -> text {
+    if t == 1 { return "print"; }
+    if t == 2 { return "list"; }
+    if t == 3 { return "add"; }
+    if t == 4 { return "count"; }
+    return "term " + str(t);
+}
+
+fn pad_to(w: i64, from: i64) {
+    var k = from;
+    while k < w { jj.o.text += " "; k += 1; }
+}
+
+fn explain_program(filter: text) {
+    jj.o.text += "filter " + filter + "
+";
+    jj.o.text += "automaton
+";
+    var n = 0;
+    while n < jj.f.nn {
+        jj.o.text += "  n" + str(n);
+        pad_to(5, len(str(n)) + 1);
+        let w2 = len(jj.o.text);
+        jj.o.text += node_path(n);
+        if jj.f.want[n] != 0 || jj.f.niter[n] >= 0 || jj.f.wantkeys[n] != 0 || jj.f.sc1[n] >= 0 || jj.f.owner[n] >= 0 || jj.f.stream[n] != 0 { pad_to(28, len(jj.o.text) - w2); }
+        if jj.f.want[n] != 0 { jj.o.text += " slot"; }
+        if jj.f.niter[n] >= 0 { jj.o.text += " iterates(n" + str(jj.f.niter[n]) + ")"; }
+        if jj.f.wantkeys[n] != 0 { jj.o.text += " keys"; }
+        if jj.f.sc1[n] >= 0 { jj.o.text += " unit(scope " + str(jj.f.sc1[n]) + ")"; }
+        if jj.f.owner[n] >= 0 { jj.o.text += " in(n" + str(jj.f.owner[n]) + ")"; }
+        if jj.f.stream[n] != 0 { jj.o.text += " streamed"; }
+        jj.o.text += "
+";
+        n += 1;
+    }
+    var s = 0;
+    while s < jj.f.nscope {
+        jj.o.text += "scope " + str(s) + "  iter n" + str(jj.f.s_iter[s]) + " " + node_path(jj.f.s_iter[s]) + "  term " + term_name(jj.f.s_term[s]) + "  entry ";
+        zpad(jj.c.entry[s], 4);
+        jj.o.text += "  input r" + str(jj.c.ein[s]) + "  ; runs at the end of each element
+";
+        s += 1;
+    }
+    jj.o.text += "root  entry ";
+    zpad(jj.c.entry[32], 4);
+    jj.o.text += "  input r" + str(jj.c.ein[32]) + "
+";
+    var i = 0;
+    while i < jj.c.n {
+        jj.o.text += "  ";
+        zpad(i, 4);
+        let w0 = len(jj.o.text);
+        jj.o.text += "  " + opname(jj.c.iop[i]);
+        pad_to(12, len(jj.o.text) - w0);
+        let o = jj.c.iop[i];
+        let w1 = len(jj.o.text);
+        jj.o.text += str(jj.c.ia[i]) + ", " + str(jj.c.ib[i]) + ", " + str(jj.c.ic[i]) + ", " + str(jj.c.id[i]);
+        pad_to(24, len(jj.o.text) - w1);
+        jj.o.text += " ; col " + str(jj.c.ipos[i]);
+        if o == Op.LOADN { jj.o.text += "  r" + str(jj.c.ia[i]) + " = " + node_path(jj.c.ib[i]) + " (n" + str(jj.c.ib[i]) + ")"; }
+        if o == Op.PRNN { jj.o.text += "  print " + node_path(jj.c.ib[i]) + " (n" + str(jj.c.ib[i]) + ")"; }
+        if o == Op.JMP || o == Op.JT || o == Op.JF || o == Op.JNZ || o == Op.JZ || o == Op.GOSUB || o == Op.GOSUBC || o == Op.JLT || o == Op.TRYB { jj.o.text += "  to " + str(jj.c.ic[i]); }
+        jj.o.text += "
+";
+        i += 1;
+    }
+}
