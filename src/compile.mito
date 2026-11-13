@@ -719,13 +719,11 @@ fn expand_closure(f: text, ci: i64) -> i64 {
     jj.f.curw = w;
     jj.noas = 0;
     jj.f.xdepth += 1;
-    jj.pdepth += 1;
     jj.cp = jj.f.dbody[ci];
     let save_src = jj.cur_src;
     jj.cur_src = jj.f.dasrc[ci];
     let r = parse_expr(src_text(jj.cur_src), 1);
     jj.cur_src = save_src;
-    jj.pdepth -= 1;
     jj.f.xdepth -= 1;
     jj.noas = save_as;
     jj.f.curw = save_w;
@@ -770,7 +768,6 @@ fn expand_def(f: text, di: i64, na: i64) -> i64 {
     jj.noas = 0;
     jj.f.xdepth += 1;
     var ok = true;
-    jj.pdepth += 1;
     // the arguments of `$` parameters are parsed at the call site
     p = 0;
     while p < na && ok {
@@ -814,7 +811,6 @@ fn expand_def(f: text, di: i64, na: i64) -> i64 {
         }
         jj.cur_src = call_src;
     }
-    jj.pdepth -= 1;
     jj.f.xdepth -= 1;
     jj.noas = save_as;
     jj.f.curw = save_w;
@@ -1472,15 +1468,9 @@ fn peek_op(f: text, q: i64) -> i64 {
 
 fn parse_expr(f: text, minp: i64) -> i64 {
     jj.pdepth += 1;
-    if jj.pdepth > 11 { jj.pdepth -= 1; return rej1("expressions or function calls nested more than 11 deep", jj.cp); }
-    let r = parse_expr0(f, minp);
-    jj.pdepth -= 1;
-    return r;
-}
-
-fn parse_expr0(f: text, minp: i64) -> i64 {
+    if jj.pdepth > 12 { jj.pdepth -= 1; return rej1("expressions or function calls nested more than 12 deep", jj.cp); }
     var lhs = parse_unary(f);
-    if lhs < 0 { return -1; }
+    if lhs < 0 { jj.pdepth -= 1; return -1; }
     var last_cmp = false;
     while true {
         let q = skip_ws(f, jj.cp);
@@ -1489,20 +1479,20 @@ fn parse_expr0(f: text, minp: i64) -> i64 {
             var e = skip_ws(f, q + 2);
             if byte_at(f, e) == 91 || byte_at(f, e) == 123 {
                 jj.cp = e;
-                return parse_as_pattern(f, lhs, q);
+                jj.pdepth -= 1; return parse_as_pattern(f, lhs, q); 
             }
-            if byte_at(f, e) != 36 { return syn1("a variable or a pattern is needed after `as`", e); }
+            if byte_at(f, e) != 36 { jj.pdepth -= 1; return syn1("a variable or a pattern is needed after `as`", e); }
             let ns = e + 1;
             e = ns;
             while is_name_char(byte_at(f, e)) { e += 1; }
-            if e == ns { return syn1("a variable name is needed after `$`", ns); }
-            if jj.f.nvars >= 60 { jj.err = "jx: too many variables in the filter"; return -1; }
+            if e == ns { jj.pdepth -= 1; return syn1("a variable name is needed after `$`", ns); }
+            if jj.f.nvars >= 60 { jj.err = "jx: too many variables in the filter"; jj.pdepth -= 1; return -1; }
             let slot = jj.f.nvars;
             jj.f.nvars += 1;
             let lo = len(jj.f.keys);
             jj.f.keys += substr(f, ns, e - ns);
             let q2 = skip_ws(f, e);
-            if byte_at(f, q2) != 124 { return syn1("expected `|` after the variable", q2); }
+            if byte_at(f, q2) != 124 { jj.pdepth -= 1; return syn1("expected `|` after the variable", q2); }
             jj.cp = q2 + 1;
             let save = jj.f.nvar;
             jj.f.vname_off[jj.f.nvar] = lo;
@@ -1511,17 +1501,17 @@ fn parse_expr0(f: text, minp: i64) -> i64 {
             jj.f.nvar += 1;
             let body = parse_expr(f, 1);
             jj.f.nvar = save;
-            if body < 0 { return -1; }
-            return mk(K.AS, lhs, body, slot, q);
+            if body < 0 { jj.pdepth -= 1; return -1; }
+            jj.pdepth -= 1; return mk(K.AS, lhs, body, slot, q); 
         }
         let o = peek_op(f, q);
         if o == 0 { break; }
-        if o < 0 { reject("assignment or update operators", q); return -1; }
+        if o < 0 { reject("assignment or update operators", q); jj.pdepth -= 1; return -1; }
         let prec = o % 64;
         let kind = o / 64;
         if prec < minp { break; }
         if prec == 7 {
-            if last_cmp { syntax("comparisons do not chain", q); return -1; }
+            if last_cmp { syntax("comparisons do not chain", q); jj.pdepth -= 1; return -1; }
             last_cmp = true;
         } else { last_cmp = false; }
         var oplen = 1;
@@ -1530,16 +1520,16 @@ fn parse_expr0(f: text, minp: i64) -> i64 {
         jj.cp = q + oplen;
         var rhs = -1;
         if prec == 1 || prec == 3 { rhs = parse_expr(f, prec); } else { rhs = parse_expr(f, prec + 1); }
-        if rhs < 0 { return -1; }
+        if rhs < 0 { jj.pdepth -= 1; return -1; }
         if kind == 1 { lhs = mk_pipe(lhs, rhs, q); }
         else if kind == 2 { lhs = mk(K.COMMA, lhs, rhs, 0, q); }
         else if kind == 3 { lhs = mk(K.ALT, lhs, rhs, 0, q); }
         else if kind == 5 { lhs = mk(K.OR, lhs, rhs, 0, q); }
         else if kind == 6 { lhs = mk(K.AND, lhs, rhs, 0, q); }
         else { lhs = mk(K.BIN, lhs, rhs, kind, q); }
-        if lhs < 0 { return -1; }
+        if lhs < 0 { jj.pdepth -= 1; return -1; }
     }
-    return lhs;
+    jj.pdepth -= 1; return lhs; 
 }
 
 // ---- analysis ----
@@ -2292,7 +2282,8 @@ fn prelude_text() -> text {
         + "def all(f): isempty(first(.[] | f | select(. | not)));" 
         + "def any: isempty(first(.[] | select(.))) | not;" 
         + "def all: isempty(first(.[] | select(. | not)));" 
-        + "def join($x): reduce .[] as $i (null; (if . == null then \"\" else . + $x end) + ($i | if type == \"boolean\" or type == \"number\" then tojson elif . == null then \"\" else . end)) // \"\";" 
+        + "def _jv: if type == \"boolean\" or type == \"number\" then tojson elif . == null then \"\" else . end;" 
+        + "def join($x): reduce .[] as $i (null; (if . == null then \"\" else . + $x end) + ($i | _jv)) // \"\";" 
         + "def to_entries: [keys_unsorted[] as $k | {key: $k, value: .[$k]}];" 
         + "def sort_by(f): _sort_by_impl(map([f]));" 
         + "def group_by(f): _group_by_impl(map([f]));" 
@@ -2304,5 +2295,7 @@ fn prelude_text() -> text {
         + "def trimstr($x): ltrimstr($x) | rtrimstr($x);" 
         + "def finites: select(isinfinite or isnan | not);" 
         + "def normals: select(isnormal);" 
-        + "def transpose: if . == [] then [] else . as $in | (map(length) | max) as $max | [range(0; $max) as $j | [range(0; $in | length) as $i | $in[$i][$j]]] end;";
+        + "def transpose: if . == [] then [] else . as $in | (map(length) | max) as $max | [range(0; $max) as $j | [range(0; $in | length) as $i | $in[$i][$j]]] end;" 
+        + "def IN(s): isempty(first(s == . | select(.))) | not;" 
+        + "def IN(src; s): isempty(first(src == s | select(.))) | not;";
 }
