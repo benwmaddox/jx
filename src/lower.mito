@@ -486,7 +486,7 @@ fn lower_block(h: i64, t: i64) {
         emit(Op.RET, 0, 0, 0, 0, pos);
         return;
     }
-    if k == K.LIMIT {
+    if k == K.LIMIT && jj.f.ac[e] != 3 {
         let mode = jj.f.ac[e];
         if mode == 4 {
             check_depth(t);

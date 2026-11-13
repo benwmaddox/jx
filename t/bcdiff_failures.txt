@@ -1,0 +1,1 @@
+fuzz|-c|((. - (. > "10")) % (try .[0].b.b catch 1.0))|D:/tmp/w/jxbc2/t/docs/fz_1_358.json
