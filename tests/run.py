@@ -132,7 +132,7 @@ opt_ok = 0
 opt_cases = [(["-Z", ".a"], b"unknown option '-Z'"), ([".a", "-Z"], b"unknown option '-Z'"), (["-S", ".a"], b"'-S' is not supported yet"),
              ([".a", "-S"], b"'-S' is not supported yet"), (["-L", ".a"], b"'-L' is not supported yet"),
              (["-C", ".a"], b"'-C' is not supported yet"), (["--indent=4", ".a"], b"unknown option '--indent'"), (["--bogus", ".a"], b"unknown option '--bogus'"), ([".a", "--bogus"], b"unknown option '--bogus'"),
-             (["--raw-output0", ".a"], b"'--raw-output0' is not supported yet"), ([".a", "--sort-keys"], b"'--sort-keys' is not supported yet"), (["-cS", ".a"], b"'-S' is not supported yet"), (["-cZ", ".a"], b"unknown option '-Z'"), ([".a", "other.json"], b"input files are not supported")]
+             (["--raw-output0", ".a"], b"'--raw-output0' is not supported yet"), ([".a", "--sort-keys"], b"'--sort-keys' is not supported yet"), (["-cS", ".a"], b"'-S' is not supported yet"), (["-cZ", ".a"], b"unknown option '-Z'"), ([".a", "other.json"], b"Could not open file other.json")]
 for args, want in opt_cases:
     with open(T + "/docs/simple.json", "rb") as f:
         p = subprocess.run([JX] + args, stdin=f, capture_output=True)
