@@ -579,6 +579,73 @@ fn copy_deep_l(h: i64, d: i64, lvl: i64) -> i64 {
     return n;
 }
 
+// the accumulator h of a streamed reduce or foreach (register r) must outlive the element that just ended: a number or a plain
+// string goes into one entry at the document level that every element overwrites (the loop then holds a constant number of
+// entries); anything else is copied there as a new value (it grows with the elements, up to the document level arena)
+fn acc_save(h: i64, r: i64) -> i64 {
+    if h < jj.v.base[1] { return h; }
+    if h >= jj.v.base[0] { return h; }
+    let t = jj.v.vt[h];
+    if t <= 3 { return h; }
+    if (t == 4 || t == 5) && jj.v.vs[h] != 2 {
+        var s = jj.ev.accs[r];
+        if s < 0 {
+            let save = jj.ev.depth;
+            jj.ev.depth = 0;
+            s = ent(4, 0, 0, 0);
+            jj.ev.depth = save;
+            if s < 0 { return -1; }
+            jj.ev.accs[r] = s;
+        }
+        jj.v.vt[s] = t;
+        jj.v.vs[s] = jj.v.vs[h];
+        jj.v.va[s] = jj.v.va[h];
+        jj.v.vb[s] = jj.v.vb[h];
+        jj.v.vf[s] = jj.v.vf[h];
+        jj.v.vx[s] = jj.v.vx[h];
+        jj.v.vd[s] = jj.v.vd[h];
+        jj.v.vn[s] = -1;
+        return s;
+    }
+    return copy_deep(h, 0);
+}
+
+// the end of one round of a reduce loop whose source keeps nothing in the arena (a range, or an iteration of a built value): what
+// the round made is dropped, except the accumulator h. The mark is register mk, the entry reserved below it is mk + 1, the scratch string's length at the mark is mk + 2.
+// A number or plain string goes into the reserved entry; any other accumulator stays where it is, and the mark moves above it.
+fn rewind_acc(h: i64, mk: i64) -> i64 {
+    let d = jj.ev.depth;
+    let m = jj.m.rv[mk];
+    var out = h;
+    if h >= m && h < jj.v.top[d] {
+        let t = jj.v.vt[h];
+        if (t == 4 || t == 5) && jj.v.vs[h] != 2 {
+            let s = jj.m.rv[mk + 1];
+            jj.v.vt[s] = t;
+            jj.v.vs[s] = jj.v.vs[h];
+            jj.v.va[s] = jj.v.va[h];
+            jj.v.vb[s] = jj.v.vb[h];
+            jj.v.vf[s] = jj.v.vf[h];
+            jj.v.vx[s] = jj.v.vx[h];
+            jj.v.vd[s] = jj.v.vd[h];
+            jj.v.vn[s] = -1;
+            out = s;
+        } else {
+            jj.m.rv[mk] = jj.v.top[d];
+            jj.m.rv[mk + 2] = len(jj.ev.scr);
+            return h;
+        }
+    }
+    jj.v.top[d] = m;
+    // strings the round built go too (a cheap cut: empty at the mark, or a short prefix)
+    let sl = jj.m.rv[mk + 2];
+    if len(jj.ev.scr) > sl {
+        if sl == 0 { jj.ev.scr = ""; }
+        else if sl <= 65536 { jj.ev.scr = substr(jj.ev.scr, 0, sl); }
+    }
+    return out;
+}
+
 // the next code that handles an element of a list: copy the entry into the arena of depth d, as the next link of register r
 fn append_reg(r: i64, h: i64, d: i64) -> i64 {
     reg_touch(r);

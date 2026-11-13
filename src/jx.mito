@@ -101,10 +101,12 @@ struct Filt {
     s_own: i64[32];               // the unit node whose element contains the playback, -1 the document
     s_next: i64[32];              // next scope on the same iteration node
     s_play: i64[32];              // the tree node that plays the register back
+    s_rb: i64[32];                // the reduce or foreach bind node whose loop runs in this scope body (streamed), -1 none
     // registers: lists being collected, folds
     r_kind: i64[64];              // 0 list, 3 add, 4 count
     r_depth: i64[64];             // the depth of the arena the results live in
     r_own: i64[64];               // the unit node whose element a register belongs to, -1 the document
+    stk: i64[1024];               // per bind node of a streamed reduce or foreach: the handle of its constant initial value + 1, 0 not streamed
 }
 
 // the scanner's stack and the slots
@@ -219,6 +221,7 @@ struct Ev {
     gpn: i64;
     stopto: i64;                  // the limit or first that wants the enumeration to stop
     rerrv: i64[64];               // a deferred error's value
+    accs: i64[64];                // per reduce register of a streamed loop: the entry at the document level that holds its accumulator, -1 none
     rec: i64;                     // recursion depth of the value functions
     hnull: i64;
     htrue: i64;
@@ -272,6 +275,8 @@ struct J {
     explain: bool;                // --explain: print the automaton and the program in readable form and stop
     dump: bool;                   // --dump-program: print the bytecode and stop
     wv_used: i64;
+    strm: i64;                    // compile: the bind node of the streamed reduce or foreach whose source is being analyzed, -1 none
+    strt: i64;                    // compile: the scope terminal that loop uses
     wv_bound: i64;
     noas: i64;                    // compile: 1 while the source of reduce is parsed (an `as` belongs to the reduce)
     cur_src: i64;                 // compile: which text is being parsed

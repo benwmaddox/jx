@@ -284,7 +284,18 @@ fn lx(e: i64, vin: i64, dst: i64) -> i64 {
         let init = lx(jj.f.ad[e], vin, -1);
         let rb = jj.f.ae[e];
         let rs = rs_reg(jj.f.ad[rb]);
-        emit(Op.MOV, rs, init, 0, 0, pos);
+        if jj.f.stk[rb] == 0 { emit(Op.MOV, rs, init, 0, 0, pos); }
+        if jj.f.stk[rb] == 0 {
+            // a range or an iteration of a built value keeps nothing in the arena between rounds: each round can be dropped
+            let sk = jj.f.ak[jj.f.aa[e]];
+            if sk == K.RANGE || (sk == K.ITER && cls(jj.f.aa[jj.f.aa[e]]) == 0) {
+                let mkr = newreg();
+                newreg();
+                newreg();
+                jj.c.rwreg[jj.f.ad[rb]] = mkr;
+                emit(Op.LDI, mkr, -1, 0, 0, pos);
+            }
+        }
         goto_node(jj.f.aa[e], vin, jj.c.curt, Op.GOSUB);
         return put_in(rs, dst);
     }
@@ -473,6 +484,13 @@ fn lower_block(h: i64, t: i64) {
             emit(Op.RET, 0, 0, 0, 0, pos);
             return;
         }
+        if jj.f.s_term[s] == 11 {
+            // a streamed reduce: the loop ran as the elements ended; here the scan's checks and the first error it met
+            emit(Op.PLAYB, newreg(), s, 0, 0, pos);
+            emit(Op.PLAYE, s, 0, 0, 0, pos);
+            emit(Op.RET, 0, 0, 0, 0, pos);
+            return;
+        }
         let cur = newreg();
         let p = succ_reg(nxt, t);
         emit(Op.PLAYB, cur, s, 0, 0, pos);
@@ -503,10 +521,12 @@ fn lower_block(h: i64, t: i64) {
         return;
     }
     if k == K.FOREACH {
-        let init = lx(jj.f.ad[e], x, -1);
         let fb = jj.f.ae[e];
         let rs = rs_reg(jj.f.ad[fb]);
-        emit(Op.MOV, rs, init, 0, 0, pos);
+        if jj.f.stk[fb] == 0 {
+            let init = lx(jj.f.ad[e], x, -1);
+            emit(Op.MOV, rs, init, 0, 0, pos);
+        }
         goto_node(jj.f.aa[e], x, t, Op.JMP);
         return;
     }
@@ -517,6 +537,7 @@ fn lower_block(h: i64, t: i64) {
         let u = lx(jj.f.ab[e], rs, -1);
         emit(Op.MOV, rs, u, 0, 0, pos);
         goto_node(jj.f.nx[e], rs, t, Op.GOSUB);
+        if jj.f.stk[e] != 0 { emit(Op.ACCSAVE, rs, jj.f.ad[e], 0, 0, pos); }
         emit(Op.RET, 0, 0, 0, 0, pos);
         return;
     }
@@ -527,10 +548,13 @@ fn lower_block(h: i64, t: i64) {
         emit(Op.MOV, var_reg(slot), x, 0, 0, pos);
         check_depth(t);
         let ft = new_frame(8, e, t);
+        if jj.c.rwreg[r] >= 0 { emit(Op.MARK, jj.c.rwreg[r], jj.c.rwreg[r] + 1, 0, 0, pos); }
         emit(Op.LDI, jj.c.tcn[ft], 0, 0, 0, pos);
         goto_node(jj.f.ab[e], rs, ft, Op.GOSUB);
         let j1 = emit(Op.JZ, jj.c.tcn[ft], 0, 0, 0, pos);
         emit(Op.MOV, rs, jj.c.thd[ft], 0, 0, pos);
+        if jj.f.stk[e] != 0 { emit(Op.ACCSAVE, rs, r, 0, 0, pos); }
+        if jj.c.rwreg[r] >= 0 { emit(Op.RWACC, rs, jj.c.rwreg[r], 0, 0, pos); }
         emit(Op.RET, 0, 0, 0, 0, pos);
         patch_here(j1);
         emit(Op.LDI, rs, jj.ev.hnull, 0, 0, pos);
@@ -762,10 +786,14 @@ fn lower_prog() -> i64 {
     var i = 0;
     while i < 1024 { jj.c.nr[i] = -1; jj.c.lab[i] = -1; jj.c.qd[i] = 0; i += 1; }
     i = 0;
-    while i < 64 { jj.c.vreg[i] = -1; jj.c.vinreg[i] = -1; jj.c.rsreg[i] = -1; i += 1; }
+    while i < 64 { jj.c.vreg[i] = -1; jj.c.vinreg[i] = -1; jj.c.rsreg[i] = -1; jj.c.rwreg[i] = -1; i += 1; }
     emit(Op.RET, 0, 0, 0, 0, 0);
     var s = 0;
+    i = 0;
+    while i < 64 { jj.ev.accs[i] = -1; i += 1; }
     while s < jj.f.nscope {
+        let rb = jj.f.s_rb[s];
+        if rb >= 0 && jj.f.stk[rb] != 0 { jj.m.rv[rs_reg(jj.f.ad[rb])] = jj.f.stk[rb] - 1; }
         let t = new_frame(jj.f.s_term[s], 1000 + s, -1);
         jj.c.tr[t] = jj.f.s_reg[s];
         let body = jj.f.s_body[s];

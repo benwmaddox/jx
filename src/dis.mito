@@ -55,6 +55,9 @@ fn opname(op: i64) -> text {
     if op == Op.LIMI { return "LIMI"; }
     if op == Op.REGFIRST { return "REGFIRST"; }
     if op == Op.UNTILCHK { return "UNTILCHK"; }
+    if op == Op.ACCSAVE { return "ACCSAVE"; }
+    if op == Op.MARK { return "MARK"; }
+    if op == Op.RWACC { return "RWACC"; }
     if op == Op.PRINT { return "PRINT"; }
     if op == Op.APPR { return "APPR"; }
     if op == Op.FOLDA { return "FOLDA"; }
@@ -147,6 +150,7 @@ fn term_name(t: i64) -> text {
     if t == 2 { return "list"; }
     if t == 3 { return "add"; }
     if t == 4 { return "count"; }
+    if t == 11 { return "reduce"; }
     return "term " + str(t);
 }
 

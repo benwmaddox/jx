@@ -64,6 +64,9 @@ const Op {
     LIMI: i64 = 88;     // limit count r[ib] of node id into r[ia]; pc = ic when there is nothing to run
     REGFIRST: i64 = 89; // r[ia] = first entry of collector ib
     UNTILCHK: i64 = 90;
+    MARK: i64 = 92;     // the first time: reserve the entry r[ib] and remember the arena's top in r[ia] (a reduce loop's per-iteration mark)
+    RWACC: i64 = 93;    // keep the accumulator r[ia] (copied into the reserved entry r[ib + ...]) and rewind the arena to the mark r[ib]
+    ACCSAVE: i64 = 91;  // move the accumulator r[ia] of reduce register ib out of the element's arena (a streamed loop)
     // 6 terminals
     PRINT: i64 = 96;
     APPR: i64 = 97;     // append r[ib] to collector ia (id 0: the collector's depth, 1: the current depth)
@@ -110,6 +113,7 @@ struct Code {
     vreg: i32[64];                // per variable slot
     vinreg: i32[64];
     rsreg: i32[64];               // per reduce register: the state
+    rwreg: i32[64];               // per reduce register: the mark register of a loop that rewinds its arena (-1 none; the reserved entry's register follows)
     // frames (the terminal of a chain)
     nt: i64;
     tk: i32[1200];                // kind, as the walker's terminal kinds: 1 print, 2 register, 3 add, 4 count, 5 register at the current depth, 6 //, 7 try, 8 hold, 9 limit, 10 isempty, 12 nth, 14 skip

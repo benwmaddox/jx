@@ -139,38 +139,33 @@ automaton
   n0   .                            streamed
   n1   .users                       slot iterates(n2) streamed
   n2   .users[]                     slot unit(scope 0) in(n2) streamed
-scope 0  iter n2 .users[]  term list  entry 0028  input r0  ; runs at the end of each element
-root  entry 0001  input r8
+scope 0  iter n2 .users[]  term reduce  entry 0010  input r5  ; runs at the end of each element
+root  entry 0001  input r10
   0000  RET       0, 0, 0, 0               ; col 0
-  0001  LDI       9, 11, 0, 0              ; col 23
-  0002  MOV       10, 9, 0, 0              ; col 0
-  0003  MOV       11, 8, 0, 0              ; col 0
-  0004  GOSUB     0, 0, 8, 0               ; col 14  to 8
-  0005  MOV       4, 10, 0, 0              ; col 0
-  0006  PRINT     4, 0, 0, 0               ; col 0
-  0007  RET       0, 0, 0, 0               ; col 0
-  0008  PLAYB     12, 0, 0, 0              ; col 14
-  0009  LISTN     12, 13, 12, 0            ; col 14
-  0010  GOSUB     0, 0, 14, 0              ; col 0  to 14
-  0011  JMP       0, 0, 9, 0               ; col 14  to 9
-  0012  PLAYE     0, 0, 0, 0               ; col 14
-  0013  RET       0, 0, 0, 0               ; col 14
-  0014  MOV       14, 13, 0, 0             ; col 0
-  0015  LDI       16, 0, 0, 0              ; col 0
-  0016  MOV       19, 10, 0, 0             ; col 0
-  0017  GOSUB     0, 0, 23, 0              ; col 28  to 23
-  0018  JZ        16, 0, 21, 0             ; col 0  to 21
-  0019  MOV       10, 17, 0, 0             ; col 0
-  0020  RET       0, 0, 0, 0               ; col 0
-  0021  LDI       10, 1, 0, 0              ; col 0
-  0022  RET       0, 0, 0, 0               ; col 0
-  0023  FIELD     20, 14, 6, 3             ; col 32
-  0024  ARITH     15, 19, 20, 21           ; col 28
-  0025  MOV       17, 15, 0, 0             ; col 0
-  0026  LDI       16, 1, 0, 0              ; col 0
-  0027  RET       0, 0, 0, 0               ; col 0
-  0028  APPR      1, 0, 0, 0               ; col 0
-  0029  RET       0, 0, 0, 0               ; col 0
+  0001  LDI       11, 11, 0, 0             ; col 23
+  0002  MOV       12, 10, 0, 0             ; col 0
+  0003  GOSUB     0, 0, 7, 0               ; col 14  to 7
+  0004  MOV       6, 0, 0, 0               ; col 0
+  0005  PRINT     6, 0, 0, 0               ; col 0
+  0006  RET       0, 0, 0, 0               ; col 0
+  0007  PLAYB     13, 0, 0, 0              ; col 14
+  0008  PLAYE     0, 0, 0, 0               ; col 14
+  0009  RET       0, 0, 0, 0               ; col 14
+  0010  MOV       14, 5, 0, 0              ; col 0
+  0011  LDI       16, 0, 0, 0              ; col 0
+  0012  MOV       19, 0, 0, 0              ; col 0
+  0013  GOSUB     0, 0, 20, 0              ; col 28  to 20
+  0014  JZ        16, 0, 18, 0             ; col 0  to 18
+  0015  MOV       0, 17, 0, 0              ; col 0
+  0016  ACCSAVE   0, 0, 0, 0               ; col 0
+  0017  RET       0, 0, 0, 0               ; col 0
+  0018  LDI       0, 1, 0, 0               ; col 0
+  0019  RET       0, 0, 0, 0               ; col 0
+  0020  FIELD     20, 14, 6, 3             ; col 32
+  0021  ARITH     15, 19, 20, 21           ; col 28
+  0022  MOV       17, 15, 0, 0             ; col 0
+  0023  LDI       16, 1, 0, 0              ; col 0
+  0024  RET       0, 0, 0, 0               ; col 0
 ### .users | group_by(.age) | length
 filter .users | group_by(.age) | length
 automaton

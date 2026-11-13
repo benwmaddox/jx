@@ -1906,7 +1906,12 @@ fn new_reg(kind: i64) -> i64 {
 
 // a scope: the iteration `it` of a path from ctx, the body that follows (-1: the elements themselves).
 // term: 1 print, 2 register (a list), 3 add fold, 4 count fold. root is the tree node that becomes the playback
-fn an_scope(root: i64, it: i64, ctx: i64, nxt: i64, body0: i64, term: i64) -> i64 {
+fn an_scope(root: i64, it: i64, ctx: i64, nxt: i64, body0: i64, term0: i64) -> i64 {
+    // a streamed reduce or foreach: its loop is the end of the body (nxt is its bind node), run as each element ends
+    let rbk = jj.strm;
+    jj.strm = -1;
+    var term = term0;
+    if rbk >= 0 { term = jj.strt; }
     var p = an_nav(jj.f.aa[it], ctx);
     if p < 0 { return -2; }
     var iter = child_iter(p);
@@ -1921,6 +1926,8 @@ fn an_scope(root: i64, it: i64, ctx: i64, nxt: i64, body0: i64, term: i64) -> i6
     jj.f.s_par[s] = p;
     jj.f.s_body[s] = body;
     jj.f.s_term[s] = term;
+    jj.f.s_rb[s] = rbk;
+    if rbk >= 0 && body < 0 { jj.f.s_body[s] = rbk; }
     jj.f.s_depth[s] = jj.an_depth + 1;
     jj.f.s_own[s] = jj.an_unit;
     jj.f.s_play[s] = root;
@@ -1940,7 +1947,12 @@ fn an_scope(root: i64, it: i64, ctx: i64, nxt: i64, body0: i64, term: i64) -> i6
     jj.an_depth = sd + 1;
     jj.an_unit = iter;
     if body >= 0 {
-        if an(body, iter, -1, false) == -2 { return -2; }
+        var bn = -1;
+        if rbk >= 0 { bn = rbk; }
+        let rcx = an(body, iter, bn, false);
+        if rcx == -2 { return -2; }
+        // a select hands on the element itself: the loop that follows needs its value (nothing else wants it when nxt is not the terminal)
+        if rbk >= 0 && rcx == iter { want_node(iter); }
     } else {
         want_node(iter);
     }
@@ -1990,6 +2002,36 @@ fn uses_outer_var(e: i64) -> bool {
     jj.wv_bound = 0;
     walk_vars(e);
     return (jj.wv_used - (jj.wv_used & jj.wv_bound)) != 0;
+}
+
+// can the loop of a reduce or foreach run inside the scope of its source, as each element of the document ends? Its source is an
+// iteration of a path (with a body of no outer variables), its initial value a constant, and neither its update nor its extract
+// uses a variable bound outside
+fn init_const(e: i64) -> i64 {
+    let n = jj.f.ad[e];
+    if jj.f.ak[n] == K.LIT { return jj.f.aa[n]; }
+    if jj.f.ak[n] == K.ARR && jj.f.aa[n] < 0 { return jj.ev.harr0; }
+    return -1;
+}
+
+fn loop_streams(e: i64, ctx: i64, slot: i64, upd: i64, ext: i64) -> bool {
+    if jj.an_depth != 0 || jj.an_unit >= 0 { return false; }
+    if init_const(e) < 0 { return false; }
+    let src = jj.f.aa[e];
+    if jj.f.ak[src] == K.PIPE {
+        let l = jj.f.aa[src];
+        if jj.f.ak[l] != K.ITER || stream_src(l, ctx) < 0 { return false; }
+        if uses_outer_var(jj.f.ab[src]) { return false; }
+    } else {
+        if jj.f.ak[src] != K.ITER || stream_src(src, ctx) < 0 { return false; }
+    }
+    jj.wv_used = 0;
+    jj.wv_bound = 0;
+    walk_vars(upd);
+    if ext >= 0 { walk_vars(ext); }
+    let free = jj.wv_used - (jj.wv_used & jj.wv_bound);
+    let own = 1 << slot;
+    return (free - (free & own)) == 0;
 }
 
 fn is_gen_head(e: i64, ctx: i64) -> bool {
@@ -2266,8 +2308,14 @@ fn an(e: i64, ctx: i64, nxt: i64, direct: bool) -> i64 {
         jj.f.ae[e] = rb;
         if cls(jj.f.ad[e]) != 0 { return reject("a generator as the initial value of reduce", jj.f.at[e]) - 3; }
         if an(jj.f.ad[e], ctx, -1, false) == -2 { return -2; }
+        if loop_streams(e, ctx, slot, jj.f.ab[e], -1) {
+            jj.strm = rb;
+            jj.strt = 11;
+            jj.f.stk[rb] = init_const(e) + 1;
+        }
         let rc = an(jj.f.aa[e], ctx, rb, false);
         if rc == -2 { return -2; }
+        if jj.strm >= 0 { jj.strm = -1; jj.f.stk[rb] = 0; }
         jj.f.vctx[slot] = rc;
         if an(jj.f.ab[e], -1, -1, false) == -2 { return -2; }
         jj.f.ac[rb] = slot;
@@ -2286,8 +2334,14 @@ fn an(e: i64, ctx: i64, nxt: i64, direct: bool) -> i64 {
         if cls(jj.f.ad[e]) != 0 { return reject("a generator as the initial value of foreach", jj.f.at[e]) - 3; }
         if cls(jj.f.ab[e]) != 0 { return reject("a foreach update that can give several or no outputs", jj.f.at[e]) - 3; }
         if an(jj.f.ad[e], ctx, -1, false) == -2 { return -2; }
+        if direct && nxt < 0 && loop_streams(e, ctx, slot, jj.f.ab[e], ext) {
+            jj.strm = fb;
+            jj.strt = 1;
+            jj.f.stk[fb] = init_const(e) + 1;
+        }
         let rc = an(jj.f.aa[e], ctx, fb, false);
         if rc == -2 { return -2; }
+        if jj.strm >= 0 { jj.strm = -1; jj.f.stk[fb] = 0; }
         jj.f.vctx[slot] = rc;
         if an(jj.f.ab[e], -1, -1, false) == -2 { return -2; }
         jj.f.nx[fb] = nxt;
@@ -2470,6 +2524,7 @@ fn compile(f: text) -> i64 {
     jj.f.sc1[0] = -1;
     jj.f.owner[0] = -1;
     jj.f.nast = 0;
+    jj.strm = -1;
     jj.f.ndef = 0;
     jj.f.curw = -1;
     jj.f.nw = 0;
