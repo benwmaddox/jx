@@ -1,0 +1,382 @@
+jqok_outer_dup|-c|.
+jqok_outer_dup|-c|.users[]
+jqok_outer_dup|-c|.users[0]
+jqok_tail_garbage|-c|.users[0]
+m_trunc_obj|-c|.users[0]
+jqok_outer_dup|-c|.users[0].n
+jqok_tail_garbage|-c|.users[0].n
+jqok_tail_truncated|-c|.users[0].n
+m_trunc_obj|-c|.users[0].n
+m_users_bad_row|-c|.users[0].n
+m_users_trunc_row|-c|.users[0].n
+jqok_outer_dup|-c|.users[].n
+jqok_outer_dup|-c|.users[].age
+jqok_outer_dup|-c|.users[].tags
+jqok_outer_dup|-c|.users[].tags[0]
+jqok_outer_dup|-c|.users[].addr
+jqok_outer_dup|-c|.users[].addr.city
+jqok_outer_dup|-c|.users[] | length
+jqok_outer_dup|-c|.users[].n | length
+jqok_tail_garbage|-c|.users[0] | length
+m_trunc_obj|-c|.users[0] | length
+jqok_outer_dup|-c|. | length
+m_nested_unbalanced|-c|.a.b
+jqok_outer_dup|-c|.users|.[]|.age
+jqok_outer_dup|-c|. | .users | .[]
+jqok_outer_dup|-c|.[]
+jqok_outer_dup|-c|.[]|length
+jqok_outer_dup|-c|."users"[0]
+jqok_tail_garbage|-c|."users"[0]
+m_trunc_obj|-c|."users"[0]
+jqok_outer_dup|-c|.users.[0]
+jqok_tail_garbage|-c|.users.[0]
+m_trunc_obj|-c|.users.[0]
+jqok_outer_dup|-c|.["users"][0]["n"]
+jqok_tail_garbage|-c|.["users"][0]["n"]
+jqok_tail_truncated|-c|.["users"][0]["n"]
+m_trunc_obj|-c|.["users"][0]["n"]
+m_users_bad_row|-c|.["users"][0]["n"]
+m_users_trunc_row|-c|.["users"][0]["n"]
+jqok_outer_dup|-c|.users[] | select(.age >= 85)
+jqok_outer_dup|-c|.users[] | select(.age >= 85) | .n
+jqok_outer_dup|-c|.users[] | select(.age > 30) | .n
+jqok_outer_dup|-c|.users[] | select(.age < 20) | .n
+jqok_outer_dup|-c|.users[] | select(.age <= 17) | .n
+jqok_outer_dup|-c|.users[] | select(.age == 31) | .n
+jqok_outer_dup|-c|.users[] | select(.age != 31) | .n
+jqok_outer_dup|-c|.users[] | select(.age == 85) | .n
+jqok_outer_dup|-c|.users[] | select(.age == 85.0) | .n
+jqok_outer_dup|-c|.users[] | select(.age > 84.999999999999999999999) | .n
+jqok_outer_dup|-c|.users[] | select(.age < 84.999999999999999999999) | .n
+jqok_outer_dup|-c|.users[] | select(.age >= 8.5e1) | .n
+jqok_outer_dup|-c|.users[] | select(.age == null) | .n
+jqok_outer_dup|-c|.users[] | select(.age == true) | .n
+jqok_outer_dup|-c|.users[] | select(.age == false) | .n
+jqok_outer_dup|-c|.users[] | select(.age == "x") | .n
+jqok_outer_dup|-c|.users[] | select(.age == "85")
+jqok_outer_dup|-c|.users[] | select(.age > "x")
+jqok_outer_dup|-c|.users[] | select(.age < "x")
+jqok_outer_dup|-c|.users[] | select(.age > null)
+jqok_outer_dup|-c|.users[] | select(.age >= true)
+jqok_outer_dup|-c|.users[] | select(.age < -1)
+jqok_outer_dup|-c|.users[] | select(.age > -1)
+jqok_outer_dup|-c|.users[] | select(.age)
+jqok_outer_dup|-c|.users[] | select(.age) | .n
+jqok_outer_dup|-c|.users[] | select(.n == "bo")
+jqok_outer_dup|-c|.users[] | select(.n == "\u00e9")
+jqok_outer_dup|-c|.users[] | select(.n == "\u0041\u00e9")
+jqok_outer_dup|-c|.users[] | select(.n == "a\"b")
+jqok_outer_dup|-c|.users[] | select(.n == "")
+jqok_outer_dup|-c|.users[] | select(.n < "b")
+jqok_outer_dup|-c|.users[] | select(.n <= "b")
+jqok_outer_dup|-c|.users[] | select(.n > "ab")
+jqok_outer_dup|-c|.users[] | select(.n >= "ab")
+jqok_outer_dup|-c|.users[] | select(.n != "bo")
+jqok_outer_dup|-c|.users[] | select(.n)
+jqok_outer_dup|-c|.users[] | select(.addr.city == "Boston") | .addr
+jqok_outer_dup|-c|.users[] | select(.addr.city == "Boston") | .addr.zip
+jqok_outer_dup|-c|.users[] | select(.addr == null) | .n
+jqok_outer_dup|-c|.users[] | select(.addr.zip > 5000)
+jqok_outer_dup|-c|.users[] | select(.tags[0] == "a") | .n
+jqok_outer_dup|-c|.users[] | select(.tags[1] == "b") | .n
+jqok_outer_dup|-c|.users[] | select(.n == "ann") | .tags
+jqok_outer_dup|-c|.users[] | select(.age > 1) | select(.age < 90) | .n
+jqok_outer_dup|-c|.users[] | select(.age > 1) | select(.age < 90)
+jqok_outer_dup|-c|.users[] | .addr | select(.zip > 5000) | .city
+jqok_outer_dup|-c|.users[] | .addr | .city
+jqok_outer_dup|-c|.users[] | select(.age >= 85) | select(.n == "di") | .age
+jqok_outer_dup|-c|.users[] | select(.age >= 85) | length
+jqok_outer_dup|-c|select(.note == null)
+jqok_outer_dup|-c|select(.f < 100000000000000000002)
+jqok_outer_dup|-c|select(.s < "b")
+m_trunc_obj|-c|.users[0] | select(.n == "ann") | .age
+jqok_outer_dup|-c|.[] | select(. > 5)
+jqok_outer_dup|-c|.[] | select(.)
+jqok_outer_dup|-c|.[] | length
+jqok_outer_dup|-c|. | length
+jqok_outer_dup|-c|.[] | .[0]
+jqok_outer_dup|-c|.[] | .[]
+jqok_outer_dup|-c|.[] | select(. > 1) | length
+jqok_tail_truncated|-c|.users[0].age + 1
+m_trunc_obj|-c|.users[0].age + 1
+m_users_bad_row|-c|.users[0].age + 1
+m_users_trunc_row|-c|.users[0].age + 1
+jqok_tail_truncated|-c|.users[0].age - 1
+m_trunc_obj|-c|.users[0].age - 1
+m_users_bad_row|-c|.users[0].age - 1
+m_users_trunc_row|-c|.users[0].age - 1
+jqok_tail_truncated|-c|.users[0].age * 2
+m_trunc_obj|-c|.users[0].age * 2
+m_users_bad_row|-c|.users[0].age * 2
+m_users_trunc_row|-c|.users[0].age * 2
+jqok_tail_truncated|-c|.users[0].age / 4
+m_trunc_obj|-c|.users[0].age / 4
+m_users_bad_row|-c|.users[0].age / 4
+m_users_trunc_row|-c|.users[0].age / 4
+jqok_tail_truncated|-c|.users[0].age % 7
+m_trunc_obj|-c|.users[0].age % 7
+m_users_bad_row|-c|.users[0].age % 7
+m_users_trunc_row|-c|.users[0].age % 7
+jqok_outer_dup|-c|.users[0].n + "x"
+jqok_tail_garbage|-c|.users[0].n + "x"
+jqok_tail_truncated|-c|.users[0].n + "x"
+m_trunc_obj|-c|.users[0].n + "x"
+m_users_bad_row|-c|.users[0].n + "x"
+m_users_trunc_row|-c|.users[0].n + "x"
+jqok_tail_truncated|-c|null + .users[0].age
+m_trunc_obj|-c|null + .users[0].age
+m_users_bad_row|-c|null + .users[0].age
+m_users_trunc_row|-c|null + .users[0].age
+jqok_tail_truncated|-c|-.users[0].age
+m_trunc_obj|-c|-.users[0].age
+m_users_bad_row|-c|-.users[0].age
+m_users_trunc_row|-c|-.users[0].age
+jqok_tail_truncated|-c|-(.users[0].age + 1)
+m_trunc_obj|-c|-(.users[0].age + 1)
+m_users_bad_row|-c|-(.users[0].age + 1)
+m_users_trunc_row|-c|-(.users[0].age + 1)
+jqok_tail_truncated|-c|.users[0].age - -1
+m_trunc_obj|-c|.users[0].age - -1
+m_users_bad_row|-c|.users[0].age - -1
+m_users_trunc_row|-c|.users[0].age - -1
+jqok_outer_dup|-c|.users[].age + 1
+jqok_outer_dup|-c|.users[] | .age + 0.5
+jqok_outer_dup|-c|.users[] | (.age | tostring)
+jqok_outer_dup|-c|.users[] | (.n | tostring)
+jqok_outer_dup|-c|.users[] | (.addr | tostring)
+jqok_tail_truncated|-c|.users[0].age == 31
+m_trunc_obj|-c|.users[0].age == 31
+m_users_bad_row|-c|.users[0].age == 31
+m_users_trunc_row|-c|.users[0].age == 31
+jqok_tail_truncated|-c|.users[0].age != 31
+m_trunc_obj|-c|.users[0].age != 31
+m_users_bad_row|-c|.users[0].age != 31
+m_users_trunc_row|-c|.users[0].age != 31
+jqok_tail_truncated|-c|.users[0].age < 40
+m_trunc_obj|-c|.users[0].age < 40
+m_users_bad_row|-c|.users[0].age < 40
+m_users_trunc_row|-c|.users[0].age < 40
+jqok_tail_truncated|-c|.users[0].age <= 31
+m_trunc_obj|-c|.users[0].age <= 31
+m_users_bad_row|-c|.users[0].age <= 31
+m_users_trunc_row|-c|.users[0].age <= 31
+jqok_tail_truncated|-c|.users[0].age > 40
+m_trunc_obj|-c|.users[0].age > 40
+m_users_bad_row|-c|.users[0].age > 40
+m_users_trunc_row|-c|.users[0].age > 40
+jqok_tail_truncated|-c|.users[0].age >= 31
+m_trunc_obj|-c|.users[0].age >= 31
+m_users_bad_row|-c|.users[0].age >= 31
+m_users_trunc_row|-c|.users[0].age >= 31
+jqok_tail_garbage|-c|.users[0].n == "ann"
+jqok_tail_truncated|-c|.users[0].n == "ann"
+m_trunc_obj|-c|.users[0].n == "ann"
+m_users_bad_row|-c|.users[0].n == "ann"
+m_users_trunc_row|-c|.users[0].n == "ann"
+jqok_outer_dup|-c|.users[0].n < "b"
+jqok_tail_garbage|-c|.users[0].n < "b"
+jqok_tail_truncated|-c|.users[0].n < "b"
+m_trunc_obj|-c|.users[0].n < "b"
+m_users_bad_row|-c|.users[0].n < "b"
+m_users_trunc_row|-c|.users[0].n < "b"
+jqok_tail_garbage|-c|.users[0].n > "A"
+jqok_tail_truncated|-c|.users[0].n > "A"
+m_trunc_obj|-c|.users[0].n > "A"
+m_users_bad_row|-c|.users[0].n > "A"
+m_users_trunc_row|-c|.users[0].n > "A"
+jqok_tail_truncated|-c|.users[0].age == 31.0
+m_trunc_obj|-c|.users[0].age == 31.0
+m_users_bad_row|-c|.users[0].age == 31.0
+m_users_trunc_row|-c|.users[0].age == 31.0
+jqok_tail_truncated|-c|.users[0].age == 3.1e1
+m_trunc_obj|-c|.users[0].age == 3.1e1
+m_users_bad_row|-c|.users[0].age == 3.1e1
+m_users_trunc_row|-c|.users[0].age == 3.1e1
+jqok_outer_dup|-c|.users[].age > 20
+jqok_outer_dup|-c|.users[] | .age >= 18 and .n != "ann"
+jqok_outer_dup|-c|.users[] | .age >= 18 or .n == "ann"
+jqok_outer_dup|-c|.users[] | (.age >= 18 and .age < 60)
+jqok_outer_dup|-c|.users[] | .age | not
+jqok_outer_dup|-c|.users[] | .n | not
+jqok_outer_dup|-c|.users[] | .addr | not
+jqok_outer_dup|-c|.users[] | (.age > 30) | not
+jqok_outer_dup|-c|.users[] | select(.age >= 18 and .age < 60) | .n
+jqok_outer_dup|-c|.users[] | select(.age < 18 or .age > 80) | .n
+jqok_outer_dup|-c|.users[] | select((.age > 18) | not) | .n
+jqok_outer_dup|-c|.users[] | select(.tags | length > 0) | .n
+jqok_outer_dup|-c|.users[] | select(.addr != null) | .addr.city
+jqok_outer_dup|-c|.users[] | select(.addr.city == "Austin")
+jqok_outer_dup|-c|.users[] | select(.n | length > 1)
+jqok_outer_dup|-c|.users[] | select(.tags) | .n
+jqok_outer_dup|-c|.users[] | select(.zzz) | .n
+jqok_outer_dup|-c|.users[] | select(.age > 18) | select(.age < 60) | .n
+jqok_outer_dup|-c|.users[] | select(.age > 18) | .tags[]
+jqok_outer_dup|-c|.users[] | select(.age > 18) | .tags[] | length
+jqok_outer_dup|-c|.users[].n, .users[].age
+jqok_outer_dup|-c|.users[] | .n, .age
+jqok_outer_dup|-c|.users[] | .n, .age, .addr.city
+jqok_outer_dup|-c|(.users[] | .n), (.users | length)
+jqok_outer_dup|-c|.users[0].n // "none"
+jqok_tail_garbage|-c|.users[0].n // "none"
+jqok_tail_truncated|-c|.users[0].n // "none"
+m_trunc_obj|-c|.users[0].n // "none"
+m_users_bad_row|-c|.users[0].n // "none"
+m_users_trunc_row|-c|.users[0].n // "none"
+jqok_outer_dup|-c|.users[] | .addr.city // "?"
+jqok_outer_dup|-c|.users[] | .tags[0] // "none"
+jqok_outer_dup|-c|.users[] | (.age > 18) // "x"
+jqok_outer_dup|-c|.users[] | .zzz // empty
+jqok_outer_dup|-c|.users[] | (.addr // {}) | .city
+jqok_tail_truncated|-c|if .users[0].age > 20 then "adult" elif .users[0].age > 10 then "teen" else "child" end
+m_trunc_obj|-c|if .users[0].age > 20 then "adult" elif .users[0].age > 10 then "teen" else "child" end
+m_users_bad_row|-c|if .users[0].age > 20 then "adult" elif .users[0].age > 10 then "teen" else "child" end
+m_users_trunc_row|-c|if .users[0].age > 20 then "adult" elif .users[0].age > 10 then "teen" else "child" end
+jqok_outer_dup|-c|.users[] | if .age >= 18 then "adult" else "minor" end
+jqok_outer_dup|-c|.users[] | if .age > 80 then .n else null end
+jqok_outer_dup|-c|.users[] | if .age > 80 then .n end
+jqok_outer_dup|-c|.users[] | if .addr then .addr.city else "?" end
+jqok_outer_dup|-c|.users[] | {n: .n}
+jqok_outer_dup|-c|.users[] | {n: .n, age: .age}
+jqok_outer_dup|-c|.users[] | {n, age}
+jqok_outer_dup|-c|.users[] | {name: .n, city: .addr.city}
+jqok_outer_dup|-c|.users[] | {n: .n, next: (.age + 1)}
+jqok_outer_dup|-c|.users[] | {(.n): .age}
+jqok_outer_dup|-c|.users[] | {"a b": .age}
+jqok_outer_dup|-c|.users[] | {a: .age, a: .n}
+jqok_outer_dup|-c|.users[] | {tags: .tags}
+jqok_outer_dup|-c|.users[] | {tags: .tags, n: (.tags | length)}
+jqok_outer_dup|-c|.users[] | {addr: .addr}
+jqok_outer_dup|-c|{u: [.users[] | .n]}
+jqok_outer_dup|-c|{count: (.users | length), names: [.users[] | .n]}
+jqok_outer_dup|-c|[.users[] | .n]
+jqok_outer_dup|-c|[.users[] | .age]
+jqok_outer_dup|-c|[.users[] | .age + 1]
+jqok_outer_dup|-c|[.users[] | select(.age > 18) | .n]
+jqok_outer_dup|-c|[.users[] | {n: .n}]
+jqok_outer_dup|-c|[.users[] | .tags]
+jqok_outer_dup|-c|[.users[] | .n, .age]
+jqok_outer_dup|-c|[.users[] | .addr.city] | length
+jqok_outer_dup|-c|[.users[] | .age] | add
+jqok_outer_dup|-c|[.users[] | .n] | add
+jqok_outer_dup|-c|[.users[] | .tags] | add
+jqok_outer_dup|-c|[.users[] | .age] | length
+jqok_outer_dup|-c|[.users[] | select(.age > 18)] | length
+jqok_outer_dup|-c|[.users[] | select(.age > 18) | .age] | add
+jqok_outer_dup|-c|[.users[] | .age | tostring] | add
+jqok_outer_dup|-c|.users | map(.age)
+jqok_outer_dup|-c|.users | map(.n)
+jqok_outer_dup|-c|.users | map(.age + 1)
+jqok_outer_dup|-c|.users | map(select(.age > 18))
+jqok_outer_dup|-c|.users | map(select(.age > 18) | .n)
+jqok_outer_dup|-c|.users | map({n: .n})
+jqok_outer_dup|-c|.users | map(.tags)
+jqok_outer_dup|-c|.users | map(.tags | length)
+jqok_outer_dup|-c|.users | map(.age) | add
+jqok_outer_dup|-c|.users | map(.n) | add
+jqok_outer_dup|-c|.users | map(.age) | length
+jqok_outer_dup|-c|.users | map(select(.age > 18)) | length
+jqok_outer_dup|-c|.users | map([.n, .age])
+jqok_outer_dup|-c|.users | map(.age) | .[0]
+jqok_outer_dup|-c|.users | map(.n) | .[1]
+jqok_outer_dup|-c|.users | add
+jqok_tail_garbage|-c|.users[0] | keys
+m_trunc_obj|-c|.users[0] | keys
+jqok_tail_garbage|-c|.users[0] | keys | length
+m_trunc_obj|-c|.users[0] | keys | length
+jqok_outer_dup|-c|. | length
+jqok_tail_garbage|-c|.users[0] | has("n")
+m_trunc_obj|-c|.users[0] | has("n")
+jqok_outer_dup|-c|.users[] | has("tags")
+jqok_outer_dup|-c|.users[] | has("addr")
+jqok_outer_dup|-c|.users[] | .tags | has(0)
+jqok_tail_garbage|-c|.users[0] | type
+m_trunc_obj|-c|.users[0] | type
+jqok_outer_dup|-c|.users[] | .age | type
+jqok_outer_dup|-c|.users[] | .n | type
+jqok_outer_dup|-c|.users[] | .tags | type
+jqok_outer_dup|-c|.users[] | .addr | type
+jqok_outer_dup|-c|.users[] | .zzz | type
+jqok_outer_dup|-c|.users[] | type
+jqok_outer_dup|-c|.users[] | (.age > 18) | type
+jqok_outer_dup|-c|[.users[] | type]
+jqok_tail_truncated|-c|.users[0].age | type
+m_trunc_obj|-c|.users[0].age | type
+m_users_bad_row|-c|.users[0].age | type
+m_users_trunc_row|-c|.users[0].age | type
+jqok_tail_garbage|-c|.users[0] | length
+m_trunc_obj|-c|.users[0] | length
+jqok_tail_garbage|-c|.users[0].n | length
+jqok_tail_truncated|-c|.users[0].n | length
+m_trunc_obj|-c|.users[0].n | length
+m_users_bad_row|-c|.users[0].n | length
+m_users_trunc_row|-c|.users[0].n | length
+jqok_tail_truncated|-c|.users[0].age | length
+m_trunc_obj|-c|.users[0].age | length
+m_users_bad_row|-c|.users[0].age | length
+m_users_trunc_row|-c|.users[0].age | length
+jqok_outer_dup|-c|.users[] | (.n | length) + .age
+jqok_outer_dup|-c|.users[] | length
+jqok_outer_dup|-c|[.users[] | length]
+jqok_outer_dup|-c|.users[] | .tags | length
+jqok_outer_dup|-c|.users[] | .addr | length
+jqok_outer_dup|-c|.users[] | empty
+jqok_outer_dup|-c|.users[] | select(false)
+jqok_outer_dup|-c|.users[] | select(true) | .n
+m_trunc_obj|-c|.users[0] | select(.age > 100)
+jqok_outer_dup|-c|if null then 2 end
+jqok_tail_truncated|-c|.users[0].age | . + 1
+m_trunc_obj|-c|.users[0].age | . + 1
+m_users_bad_row|-c|.users[0].age | . + 1
+m_users_trunc_row|-c|.users[0].age | . + 1
+jqok_tail_truncated|-c|.users[0].age | . * .
+m_trunc_obj|-c|.users[0].age | . * .
+m_users_bad_row|-c|.users[0].age | . * .
+m_users_trunc_row|-c|.users[0].age | . * .
+m_trunc_obj|-c|.users[0] | .age + .age
+m_trunc_obj|-c|.users[0] | [.n, .age]
+jqok_outer_dup|-c|.users | .[]
+jqok_outer_dup|-c|.users | .[] | .n
+jqok_outer_dup|-c|.users | map(.addr.city) | length
+jqok_outer_dup|-c|.users[].tags | length
+jqok_outer_dup|-c|.users[] | .tags | .[0]
+jqok_outer_dup|-c|.users[]?
+jqok_outer_dup|-c|try (.users[] | .n.x) catch .
+jqok_outer_dup|-c|try error catch .
+jqok_outer_dup|-c|.users[0] as $u | $u.n
+jqok_tail_garbage|-c|.users[0] as $u | $u.n
+m_trunc_obj|-c|.users[0] as $u | $u.n
+jqok_tail_truncated|-c|.users[0].age as $a | $a + 1
+m_trunc_obj|-c|.users[0].age as $a | $a + 1
+m_users_bad_row|-c|.users[0].age as $a | $a + 1
+m_users_trunc_row|-c|.users[0].age as $a | $a + 1
+jqok_outer_dup|-c|.users[] | .age as $a | {a: $a}
+jqok_outer_dup|-c|[.users[] | .age as $a | $a + 1]
+jqok_outer_dup|-c|[limit(1; .users[])]
+jqok_outer_dup|-c|limit(2; .users[] | .n)
+jqok_outer_dup|-c|first(.users[] | .n)
+jqok_outer_dup|-c|[.users[] | .n] | first
+jqok_outer_dup|-c|isempty(.users[])
+jqok_outer_dup|-c|[.users[] | .age] | map(. + 1)
+jqok_outer_dup|-c|last(.users[] | .n)
+jqok_outer_dup|-c|nth(1; .users[] | .n)
+jqok_outer_dup|-c|(.users[] | .age) as $a | $a
+jqok_outer_dup|-c|[.[] | try error("x") catch .]
+jqok_outer_dup|-c|[.users[] | .tags[]?]
+jqok_outer_dup|-c|.users[] | .addr.city?
+jqok_outer_dup|-c|[.users[] | .age + 1 | until(. > 100; . * 2)]
+jqok_outer_dup||.
+jqok_outer_dup||.users[]
+jqok_outer_dup||.users[0]
+jqok_tail_garbage||.users[0]
+m_trunc_obj||.users[0]
+jqok_outer_dup||.[]
+jqok_outer_dup||.users[] | select(.age >= 85)
+jqok_outer_dup||.users[].addr
+jqok_outer_dup|-r|.
+jqok_outer_dup|-r|.users[].n
+jqok_outer_dup|-r|.users[] | select(.age >= 85) | .n
+jqok_outer_dup|-r|.[]
+jqok_outer_dup|-c -r|.
+jqok_outer_dup|-c -r|.users[].n
+jqok_outer_dup|-c -r|.users[] | select(.age >= 85) | .n
+jqok_outer_dup|-c -r|.[]

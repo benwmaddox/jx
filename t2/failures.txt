@@ -1,0 +1,1 @@
+nums|-c|.users[] | (.age | tostring | tonumber)  (jq rc=0, jx rc=0)
