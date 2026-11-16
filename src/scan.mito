@@ -257,8 +257,10 @@ fn skip_from(doc: text, p: i64, depth0: i64) -> i64 {
         let q = quotes ^ (quotes & escaped);
         let inside = q.prefix_xor() ^ (0 - instr);
         instr = inside >>> 63;
-        let opens = ((v == 123) | (v == 91)).mask();
-        let closes = ((v == 125) | (v == 93)).mask();
+        // `[` and `{` differ only in bit 5, as do `]` and `}`: one OR folds each pair onto one compare
+        let folded = v | 32;
+        let opens = (folded == 123).mask();
+        let closes = (folded == 125).mask();
         let o = opens ^ (opens & inside);
         let c = closes ^ (closes & inside);
         if depth > 0 && c.popcount() < depth {
@@ -350,8 +352,8 @@ fn new_value() {
     jj.sc.rt = false;
     var d = 0;
     while d < 4 { jj.v.top[d] = jj.v.base[d]; d += 1; }
-    jj.ev.scr = "";
-    jj.ev.ptx = "";
+    if len(jj.ev.scr) > 0 { jj.ev.scr = ""; }   // most values build no text: no store at all
+    if len(jj.ev.ptx) > 0 { jj.ev.ptx = ""; }
     jj.ev.err = 0;
     jj.ev.depth = 0;
 }
