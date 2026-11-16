@@ -4,13 +4,14 @@ through jq (1.8.2) and through jx, and compares stdout byte for byte (CRLF norma
 A case jq answers with an error passes when jx also fails with a message on stderr (the exit codes differ: jq 2/3/5, jx 1, and jx
 writes no partial output). Cases matching a line of tests/xdiff.txt are expected differences (README.md, "Differences from jq"):
 counted apart, never a failure.
-usage: python tests/run.py [path-to-jx-exe]   (JX_TMP: scratch directory, default D:/tmp/w/jx/t)"""
+usage: python tests/run.py [path-to-jx-exe]   (JX_TMP: scratch directory, default D:/tmp/w/jx/t; JX_ARGS: options added to every jx run, e.g. --selective)"""
 import fnmatch, os, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JX = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("JX", "D:/tmp/w/jx/b/jx.exe")
 T = os.environ.get("JX_TMP", "D:/tmp/w/jx/t")
+JX_ARGS = os.environ.get("JX_ARGS", "").split()
 os.makedirs(T + "/docs", exist_ok=True)
 
 def split_docs(path):
@@ -62,7 +63,7 @@ def norm(b): return b.replace(b"\r\n", b"\n")
 def run(exe, flags, filt, doc):
     with open("%s/docs/%s.json" % (T, doc), "rb") as f:
         try:
-            p = subprocess.run([exe] + flags + [filt], stdin=f, capture_output=True, timeout=60)
+            p = subprocess.run([exe] + (JX_ARGS if exe == JX else []) + flags + [filt], stdin=f, capture_output=True, timeout=60)
         except subprocess.TimeoutExpired:
             return -9, b"", b"timeout"
     return p.returncode, p.stdout, p.stderr
@@ -113,7 +114,7 @@ with ThreadPoolExecutor(max_workers=6) as ex:
 rej_ok = 0
 for filt in lines("reject.txt"):
     with open(T + "/docs/simple.json", "rb") as f:
-        p = subprocess.run([JX, "-c", filt], stdin=f, capture_output=True)
+        p = subprocess.run([JX] + JX_ARGS + ["-c", filt], stdin=f, capture_output=True)
     if p.returncode == 1 and not p.stdout and b"not supported" in p.stderr: rej_ok += 1
     else: failures.append("reject: %s (rc=%d, stderr=%r)" % (filt, p.returncode, p.stderr[:80]))
 nrej = len(lines("reject.txt"))
@@ -123,7 +124,7 @@ for filt in lines("syntax.txt"):
     with open(T + "/docs/simple.json", "rb") as f:
         q = subprocess.run(["jq", "-c", filt], stdin=f, capture_output=True)
     with open(T + "/docs/simple.json", "rb") as f:
-        p = subprocess.run([JX, "-c", filt], stdin=f, capture_output=True)
+        p = subprocess.run([JX] + JX_ARGS + ["-c", filt], stdin=f, capture_output=True)
     if q.returncode == 3 and p.returncode == 3 and not p.stdout and b"syntax error" in p.stderr: syn_ok += 1
     else: failures.append("syntax: %s (jq rc=%d, jx rc=%d, stderr=%r)" % (filt, q.returncode, p.returncode, p.stderr[:80]))
 nsyn = len(lines("syntax.txt"))
@@ -135,7 +136,7 @@ opt_cases = [(["-Z", ".a"], b"unknown option '-Z'"), ([".a", "-Z"], b"unknown op
              (["--raw-output0", ".a"], b"'--raw-output0' is not supported yet"), ([".a", "--sort-keys"], b"'--sort-keys' is not supported yet"), (["-cS", ".a"], b"'-S' is not supported yet"), (["-cZ", ".a"], b"unknown option '-Z'"), ([".a", "other.json"], b"Could not open file other.json")]
 for args, want in opt_cases:
     with open(T + "/docs/simple.json", "rb") as f:
-        p = subprocess.run([JX] + args, stdin=f, capture_output=True)
+        p = subprocess.run([JX] + JX_ARGS + args, stdin=f, capture_output=True)
     good = p.returncode == 2 and not p.stdout and want in p.stderr
     if good: opt_ok += 1
     else: failures.append("option: %s (rc=%d, stdout=%r, stderr=%r)" % (" ".join(args), p.returncode, p.stdout[:30], p.stderr[:80]))
@@ -146,7 +147,7 @@ for args, want in (([".users[0].n", "-c"], b'"ann"\n'), (["-c", "--raw-output", 
                    (["-nc", "$ARGS.named", "--arg", "k", "v"], b'{"k":"v"}\n'), (["-nc", "$ARGS.positional", "--args", "p", "q"], b'["p","q"]\n'), (["--tab", ".users[0].addr.zip"], b"78701\n"),
                    (["-j", ".users[0].n"], b'ann'), (["-e", ".users[0].n"], b'"ann"\n'), (["-c", "--indent", "3", ".users[0].tags"], None)):
     with open(T + "/docs/simple.json", "rb") as f:
-        p = subprocess.run([JX] + args, stdin=f, capture_output=True)
+        p = subprocess.run([JX] + JX_ARGS + args, stdin=f, capture_output=True)
     opt_n_extra = 1
     if want is None: continue
     if p.returncode == 0 and p.stdout.replace(b"\r\n", b"\n") == want: opt_ok += 1
@@ -157,7 +158,7 @@ for args, doc, want in ((["-c", "-s", "."], b'{"a":1}', b'[{"a":1}]\n'), (["-c",
                         (["-c", "-a", "."], b'["\xc3\xa9\xf0\x9f\x98\x80\x7f"]', b'["\\u00e9\\ud83d\\ude00\\u007f"]\n'), (["-r", "-a", "."], b'"\xc3\xa9"', b'"\\u00e9"\n'),
                         (["-c", "-a", '{"k\\u00e9": .}'], b'"\xc3\xa9"', b'{"k\\u00e9":"\\u00e9"}\n'),
                         (["-c", "--seq", "."], b'[1,2]', b'\x1e[1,2]\n'), (["-c", "--seq", ".[]"], b'[1,2]', b'\x1e1\n\x1e2\n'), (["-sc", "map(.a)"], b'{"a":1}', b'[1]\n')):
-    p = subprocess.run([JX] + args, input=doc, capture_output=True)
+    p = subprocess.run([JX] + JX_ARGS + args, input=doc, capture_output=True)
     if p.returncode == 0 and p.stdout.replace(b"\r\n", b"\n") == want: opt_ok += 1
     else: failures.append("option form: %s %r (rc=%d, stdout=%r)" % (" ".join(args), doc, p.returncode, p.stdout[:60]))
     opt_cases.append(None)
@@ -166,14 +167,14 @@ exit_ok = 0
 exit_cases = [([".a |"], b'{"a":1}', 3), (["{a:"], b'{"a":1}', 3), ([".a.b"], b'{"a":1}', 5), (["error"], b'{"a":1}', 5), ([".a"], b'{"a":', 5), ([".a"], b'{"a":1} garbage', 5),
               ([".[]"], b'1', 5), (["walk(.)"], b'1', 1), ([".a", "-Z"], b'1', 2), ([".a"], b'{"a":1}', 0), (["--validate", ".a"], b'{"a":1} x', 5)]
 for args, doc, want in exit_cases:
-    p = subprocess.run([JX, "-c"] + args, input=doc, capture_output=True)
+    p = subprocess.run([JX] + JX_ARGS + ["-c"] + args, input=doc, capture_output=True)
     if p.returncode == want and (want == 0 or (not p.stdout and p.stderr)): exit_ok += 1
     else: failures.append("exit code: %s %r want %d got %d %r" % (args, doc, want, p.returncode, p.stderr[:60]))
 # --validate: reads the whole input and fails when anything follows the first value (jq: parse error, exit 2; jx exits 1)
 val_ok = 0
 for doc, flags, want_rc in ((b'{"a":{"x":1}}', ["--validate"], 0), (b'{"a":{"x":1},"b":garbage}', ["--validate"], 5), (b'{"a":{"x":1},"b":[1,2', ["--validate"], 5),
                             (b'{"a":{"x":1},"b":garbage}', [], 0)):
-    p = subprocess.run([JX, "-c"] + flags + [".a.x"], input=doc, capture_output=True)
+    p = subprocess.run([JX] + JX_ARGS + ["-c"] + flags + [".a.x"], input=doc, capture_output=True)
     if p.returncode == want_rc and (want_rc != 0 or True): val_ok += 1
     else: failures.append("validate: %r %s (rc=%d)" % (doc, flags, p.returncode))
 print("cases: %d against jq: %d pass, %d fail, %d expected differences (%d of them matched anyway); compile-time rejections: %d of %d ok; "

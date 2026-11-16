@@ -9,8 +9,20 @@ fn scan_string(doc: text, p: i64) -> i64 {
     var i = p + 1;
     var fl = 0;
     while true {
+        // 64 bytes at a time up to the next byte that needs a look (a quote, a backslash, a control character, DEL, or the end: bytes past it read 0);
+        // a byte of 128 or more before it only sets the flag
+        let v = doc.load_u8x64(i);
+        let stop = ((v == 34) | (v == 92) | (v < 32) | (v == 127)).mask();
+        let high = (v >= 128).mask();
+        if stop == 0 {
+            if high != 0 { fl = fl | 2; }
+            i += 64;
+            continue;
+        }
+        let k = stop.trailing_zeros();
+        if high.trailing_zeros() < k { fl = fl | 2; }
+        i += k;
         let c = byte_at(doc, i);
-        if c >= 32 && c < 127 && c != 92 && c != 34 { i += 1; continue; }
         if c == 34 { jj.sc.esc = fl; return i + 1; }
         if c < 0 { return fail_at("unfinished string", i); }
         if c >= 127 { if c == 127 { fl = fl | 1; } else { fl = fl | 2; } i += 1; continue; }
@@ -216,6 +228,55 @@ fn key_depth(node: i64) -> i64 {
     return jj.f.s_depth[jj.f.sc1[ow]];
 }
 
+// --selective: the position after the container whose opening bracket is at p, found 64 bytes at a time by counting brackets outside strings.
+// Nothing inside is checked (as simdjson's On-Demand skips a value): only where strings start and end, a backslash escaping the byte after it.
+// -1 with jj.err set when the input ends first.
+fn skip_container(doc: text, p: i64) -> i64 {
+    var i = p;
+    var depth = 0;
+    var instr = 0;      // 1 when this block starts inside a string
+    var carry = 0;      // 1 when this block's first byte is escaped (the last block ended with a backslash that escapes)
+    while i < len(doc) {
+        let v = doc.load_u8x64(i);
+        // escaped bytes: a backslash that is not itself escaped escapes the byte after it (backslashes are rare: one at a time)
+        var escaped = carry;
+        carry = 0;
+        var rest = (v == 92).mask();
+        while rest != 0 {
+            let j = rest.trailing_zeros();
+            let bit = 1 << j;
+            if (escaped & bit) == 0 {
+                if j == 63 { carry = 1; } else { escaped = escaped | (bit << 1); }
+            }
+            rest = rest ^ bit;
+        }
+        let quotes = (v == 34).mask();
+        let q = quotes ^ (quotes & escaped);
+        let inside = q.prefix_xor() ^ (0 - instr);
+        instr = inside >>> 63;
+        let opens = ((v == 123) | (v == 91)).mask();
+        let closes = ((v == 125) | (v == 93)).mask();
+        let o = opens ^ (opens & inside);
+        let c = closes ^ (closes & inside);
+        if c.popcount() < depth {
+            depth += o.popcount() - c.popcount();
+        } else {
+            var s = o | c;
+            while s != 0 {
+                let j = s.trailing_zeros();
+                let bit = 1 << j;
+                if (o & bit) != 0 { depth += 1; } else {
+                    depth -= 1;
+                    if depth == 0 { return i + j + 1; }
+                }
+                s = s ^ bit;
+            }
+        }
+        i += 64;
+    }
+    return fail_at("unfinished JSON term", len(doc));
+}
+
 // the whole document: 0, or 1 with jj.err set
 fn scan(doc: text, filter: text) -> i64 {
     var u = 0;
@@ -229,7 +290,13 @@ fn scan(doc: text, filter: text) -> i64 {
         if mode == 0 {
             p = skip_ws(doc, p);
             let c = byte_at(doc, p);
-            if c == 123 || c == 91 {
+            if (c == 123 || c == 91) && node < 0 && jj.sc.selective {
+                // a container nobody reads: skipped whole
+                let e = skip_container(doc, p);
+                if e < 0 { return 1; }
+                p = e;
+                mode = 1;
+            } else if c == 123 || c == 91 {
                 let sp = jj.sc.sp + 1;
                 if sp > 10000 { return fail_at("exceeds depth limit for parsing", p); }
                 var tag = 6;

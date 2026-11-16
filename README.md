@@ -21,7 +21,7 @@ writes a message to standard error and exits with 1 (jq uses 2, 3 and 5), with n
 
 **Options.** jx parses its own arguments (the program takes the runtime's raw `args`), so an option is understood or refused wherever it is written, before or
 after the filter, long or short, combined (`-cr`): `-c`, `-r`, `-j`, `-n`, `-e`, `-s`/`--slurp`, `-a`/`--ascii-output`, `--seq`, `-M`, `--tab`, `--indent n`, `--arg`,
-`--argjson`, `--args`, `--jsonargs`, `--slurpfile`, `--rawfile`, `-f`/`--from-file`, `-R`/`--raw-input`, `-h`/`--help`, `-V`/`--version`, `--validate`, `--explain`
+`--argjson`, `--args`, `--jsonargs`, `--slurpfile`, `--rawfile`, `-f`/`--from-file`, `-R`/`--raw-input`, `-h`/`--help`, `-V`/`--version`, `--validate`, `--selective`, `--explain`
 and `--dump-program` are built; every other jq option is a hard error before anything is read, `jx: option '-S' is not supported yet` (`-S -C -L -b` and `--stream
 --stream-errors --sort-keys --color-output --raw-output0 --library-path --binary --build-configuration --strict`), `jx: unknown option '--bogus'` for anything else.
 Standard input is read only when the filter needs it (`stdin_text`, a Mitochondria runtime feature): `-n`, `--explain`, `--dump-program`, `--help`, `--version` and a
@@ -77,6 +77,12 @@ Details that matter:
 - **Last key wins** (jq's rule for duplicate keys): a repeated key forgets what the earlier occurrence filled. A repeat of a named key on a path that is being streamed is an error, not a silent difference.
 - **Early exit** (design decisions 2 and 3): a filter with no `[]` stops after the container that held its last filled value ends, and the unread tail is not validated. `--validate` reads and validates to the end
   and fails (exit 1; jq exits 2) when anything but white space follows the first value.
+- **Checked by default, `--selective` on request.** By default every value the scanner passes is checked as strict JSON (numbers, escapes, literals,
+  brackets), also inside objects and arrays the filter never reads, so an invalid document fails as it does in jq. `--selective` skips an object or array
+  the filter does not read by counting brackets outside strings, 64 bytes at a time, without checking what is inside (simdjson's On-Demand does the same):
+  about 2x faster on GH Archive events, and invalid JSON inside a skipped part goes unnoticed. `--selective` with `--validate` is a usage error.
+- **Byte vectors.** Strings are scanned 64 bytes at a time up to the next quote, backslash or control byte (Mitochondria's `u8x64`, `mask`,
+  `trailing_zeros`), and `--selective` finds the end of a skipped container the same way (`prefix_xor` marks the bytes inside strings).
 - **Missing values** are null; a missing or null value that the filter iterates is jq's error, raised when the iteration is played back.
 - Empty or blank input prints nothing and exits 0, as jq does.
 - **Strings**: bytes that are not valid UTF-8 are replaced as jq's decoder does when the string is printed, compared, measured or built on (one U+FFFD per invalid lead byte, one for a truncated
@@ -96,6 +102,7 @@ Details that matter:
 | `tonumber` of `nan`, `Infinity`, `0x10` | an error | `nan` and `Infinity` are accepted |
 | Output over 4 GiB, strings built by the filter over 16 MB, an arena that is full | error naming the limit (exit 1) | prints |
 | `--strict` (design decision 1) | not implemented | n/a |
+| `--selective`: invalid JSON inside an object or array the filter does not read | answers | rejects the document |
 
 ## Tests
 
@@ -127,6 +134,22 @@ Computed indexes (`.[$k]`, `.[expr]`, negative literal indexes) stay rejected in
 **Expected differences added.** The `fromjson` error text for invalid JSON differs from jq's (jq words the position and the parser state; jx says the text is not strict JSON), so `try fromjson catch .` differs on invalid text (jq.test lines 2324 and 2498). `tojson | fromjson` and `map(try implode catch .)` on inputs with `nan` are the existing non-strict-input differences.
 
 ## Results
+
+**Byte vectors, `--selective`, mapped input (branch simd-scan, 2026-11-15).** Needs Mitochondria v0.1.0 or later (byte vectors and mapped input, #55;
+the Linux text-area fix, #54). GH Archive 2024-01-15 hours 12-14 as one array (2.9 GB, 827,068 events),
+`.[] | select(.type == "WatchEvent") | .repo.name`, WSL on a Core Ultra 9 185H, one core, best of 5, the file in the page cache, all in one session
+(the machine's speed changed between sessions: compare within the table). Every jx run prints jq's 28,483 lines byte for byte. Times are whole runs.
+
+| jx build | checked (default) | `--selective` |
+| --- | --- | --- |
+| before (one byte at a time, input copied) | 4.67 s (0.62 GB/s) | |
+| byte vectors, input copied | 2.69 s | 1.97 s |
+| byte vectors, input mapped (Linux), default CPU | 1.65 s | 0.86 s |
+| the same, `CPU=x86-64-v2` | 1.65 s | 0.79 s |
+| the same, `CPU=x86-64-v3` (AVX2) | 1.52 s (1.91 GB/s) | 0.61 s (4.8 GB/s) |
+
+simdjson 5.2 on the events as NDJSON, same session: On-Demand reading `type` and `repo.name` 0.54 s with the file already in memory (5.39 GB/s; 1.66 GB/s
+counting its own load of the file), DOM 0.90 s (3.23 GB/s in memory). jq 1.8.1 took 43 s and jaq 3.1.2 21 s in an earlier session (NDJSON).
 
 **529 MB document, stage3-shapefix build** (jx only, seconds / peak MB, one run each; jq and jaq numbers are the ones above): `.users[0].n` 0.2 / 554, `.users | length` 1.0 / 555, `select` 1.5 / 567, `{n: .n, c: .addr.city}` 4.4 / 940, `[label $o | .users[] | .age, break $o]` 1.4 / 802 (the label forces the whole array to be read as a value). `reduce .users[] as $u (0; . + $u.age)` fails on this document: `out of value memory at nesting depth 0` (the loop keeps 6.5 million element values; reduce over huge arrays is a known limit, fine on the 16 MB document).
 

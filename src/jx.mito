@@ -117,6 +117,7 @@ struct Scan {
     isint: bool;
     anyerr: bool;                 // a navigation error was recorded in this run
     validate: bool;
+    selective: bool;              // --selective: a container the filter does not read is skipped by counting brackets, not checked (scan.mito, skip_container)
     fnode: i64[10002];            // per open container: its automaton node, -1 when skipped
     fkind: i64[10002];            // 6 array, 7 object
     fcnt: i64[10002];             // elements or keys so far
@@ -423,6 +424,7 @@ fn parse_opts(args: text) -> i64 {
     jj.o.pretty = true;
     jj.o.raw = false;
     jj.sc.validate = false;
+    jj.sc.selective = false;
     jj.fs = -1;
     jj.fe = -1;
     jj.o.ind = 2;
@@ -443,6 +445,7 @@ fn parse_opts(args: text) -> i64 {
                 else if arg_is(args, s, e, "--compact-output") { jj.o.pretty = false; }
                 else if arg_is(args, s, e, "--raw-output") { jj.o.raw = true; }
                 else if arg_is(args, s, e, "--validate") { jj.sc.validate = true; }
+                else if arg_is(args, s, e, "--selective") { jj.sc.selective = true; }
                 else if arg_is(args, s, e, "--dump-program") { jj.dump = true; }
                 else if arg_is(args, s, e, "--explain") { jj.dump = true; jj.explain = true; }
                 else if arg_is(args, s, e, "--null-input") { jj.nullin = true; }
@@ -520,13 +523,14 @@ fn parse_opts(args: text) -> i64 {
         }
         s = e + 1;
     }
+    if jj.sc.validate && jj.sc.selective { return usage("--validate and --selective together: one checks every byte, the other skips what the filter does not read"); }
     return 0;
 }
 
 fn help_text() -> text {
     return "Usage: jx [OPTIONS] FILTER [FILE]\n"
         + "jx reads one JSON document (standard input, or one file) in a single pass and runs a jq filter over it.\n\n"
-        + "Options (see the README for the exact list): -c -r -j -a -s -n -e --tab --indent N --arg --argjson --args --jsonargs --seq --validate -h -V\n"
+        + "Options (see the README for the exact list): -c -r -j -a -s -n -e --tab --indent N --arg --argjson --args --jsonargs --seq --validate --selective -h -V\n"
         + "Not supported (exit 1 or 2): regex, walk, path functions, assignment, recursive descent, dates, modules, -S, -C.\n";
 }
 
