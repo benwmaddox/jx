@@ -819,7 +819,7 @@ fn main(args: utf8<0..1048576> from args, env: utf8<0..1048576> from env) -> Res
     jj.envtxt = env;
     var rc = parse_opts(args);
     if rc == 0 && jj.help == 1 { return ok(help_text()); }
-    if rc == 0 && jj.help == 2 { return ok("jx 0.1\n"); }
+    if rc == 0 && jj.help == 2 { return ok("jx 0.2\n"); }
     if jj.o.ascii { jj.o.raw = false; }
     if rc == 0 {
         if jj.fromfile && jj.fs < 0 { rc = usage("-f needs the name of the file with the filter"); }
