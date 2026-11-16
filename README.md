@@ -136,29 +136,32 @@ Computed indexes (`.[$k]`, `.[expr]`, negative literal indexes) stay rejected in
 ## Results
 
 **Benchmark: GH Archive stars (jx v0.1.0, 2026-11-15).** Every `WatchEvent`'s `repo.name` from 3 hours of GH Archive (2024-01-15, hours 12-14:
-2.9 GB, 827,068 events). Each row is a whole run: start, reading the file, scanning, printing. One core of a Core Ultra 9 185H (WSL 2, Linux),
-file in the page cache, best of 5 (jq, jaq and gojq: best of 3). Every tool finds the same 28,483 stars. Reproduce with `bench/gharchive/run.sh`.
+2.9 GB, 827,068 events). One core of a Core Ultra 9 185H (WSL 2, Linux), files in the page cache, best of 5 (jq, jaq and gojq: best of 3).
+Every tool finds the same 28,483 stars. Reproduce with `bench/gharchive/run.sh`.
 
-| tool | input | time | GB/s |
-| --- | --- | --- | --- |
-| jx v0.1.0 `--selective`, x86-64-v3 build | array | 0.61 s | 4.80 |
-| jx v0.1.0 `--selective` | array | 0.80 s | 3.66 |
-| jx v0.1.0, x86-64-v3 build (checked) | array | 1.35 s | 2.15 |
-| simdjson 5.2.0 On-Demand, reads two fields | NDJSON | 1.47 s | 1.98 |
-| jx v0.1.0 (checked, the default) | array | 1.53 s | 1.90 |
-| simdjson 5.2.0 DOM | NDJSON | 1.81 s | 1.60 |
-| simdjson 5.2.0 On-Demand, every value | NDJSON | 2.06 s | 1.41 |
-| simdjson 5.2.0 On-Demand, reads two fields | array | 2.13 s | 1.37 |
-| yyjson 0.13.0 DOM | NDJSON | 2.29 s | 1.27 |
-| jaq 3.1.2 | NDJSON | 8.66 s | 0.34 |
-| jq 1.8.1 | NDJSON | 19.84 s | 0.15 |
-| gojq 0.12.20 | NDJSON | 25.38 s | 0.11 |
+| Mode | Reader | Input | Best throughput, file in memory | Best throughput, whole run | Stars |
+| --- | --- | --- | --- | --- | --- |
+| Selective | jx (x86-64-v3 build) --selective | array | 4.72 GB/s | 4.70 GB/s | 28483 |
+| Selective | jx --selective | array | 3.50 GB/s | 3.49 GB/s | 28483 |
+| Selective | simdjson On-Demand (reads type, repo.name) | NDJSON | 5.61 GB/s | 1.95 GB/s | 28483 |
+| Selective | simdjson On-Demand (reads type, repo.name) | array | 3.22 GB/s | 1.58 GB/s | 28483 |
+| Checked | jx (x86-64-v3 build) | array | 1.99 GB/s | 1.99 GB/s | 28483 |
+| Checked | jx | array | 1.85 GB/s | 1.85 GB/s | 28483 |
+| Checked | simdjson DOM | NDJSON | 3.39 GB/s | 1.56 GB/s | 28483 |
+| Checked | simdjson On-Demand, full walk | NDJSON | 2.71 GB/s | 1.42 GB/s | 28483 |
+| Checked | yyjson DOM | NDJSON | 2.20 GB/s | 1.27 GB/s | 28483 |
+| Checked | jaq 3.1.2 | NDJSON | - | 0.33 GB/s | 28483 |
+| Checked | jq 1.8.1 | NDJSON | - | 0.14 GB/s | 28483 |
+| Checked | gojq 0.12.20 | NDJSON | - | 0.11 GB/s | 28483 |
 
-jx reads one document, so it gets the events as one array (`[ev, ev, ...]`); the others get them one per line. simdjson and yyjson are libraries: their
-rows are `bench/gharchive/ghbench.cpp` (g++ 13 `-O3 -march=native`), which loads the file with the library's loader, then counts the stars and
-distinct repos. jx maps its input file (Mitochondria v0.1.0, Linux), so reading costs almost nothing; the libraries copy it into memory first.
-"Checked" reads and validates every value as jq does; `--selective` skips objects and arrays the filter does not read ("How it works", above).
-jx before v0.1.0 (one byte at a time, input copied) took 4.67 s for the checked run.
+- **Selective** reads only what the query needs and skips the rest without checking it; **checked** reads and validates every value, as jq does.
+- **File in memory:** simdjson and yyjson are libraries, run by `bench/gharchive/ghbench.cpp` (g++ 13 `-O3 -march=native`): the best of 5 parses
+  in one process after the file is loaded. jx maps its input file (Mitochondria v0.1.0, Linux), so it has no load step: its figure is the whole run
+  minus its start-up (3 ms), page faults of the mapping included. jq, jaq and gojq read as they parse, so they have only the whole-run figure.
+- **Whole run:** process start, reading the file, scanning and printing; for the libraries this includes loading the file into memory.
+- jx reads one document, so it gets the events as one array (`[ev, ev, ...]`); the others get one event per line (NDJSON). simdjson's On-Demand
+  is shown on both.
+- jx before v0.1.0 (one byte at a time, input copied) ran the checked query at 0.62 GB/s whole run.
 
 **529 MB document, stage3-shapefix build** (jx only, seconds / peak MB, one run each; jq and jaq numbers are the ones above): `.users[0].n` 0.2 / 554, `.users | length` 1.0 / 555, `select` 1.5 / 567, `{n: .n, c: .addr.city}` 4.4 / 940, `[label $o | .users[] | .age, break $o]` 1.4 / 802 (the label forces the whole array to be read as a value). `reduce .users[] as $u (0; . + $u.age)` fails on this document: `out of value memory at nesting depth 0` (the loop keeps 6.5 million element values; reduce over huge arrays is a known limit, fine on the 16 MB document).
 
