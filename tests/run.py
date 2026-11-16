@@ -12,6 +12,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 JX = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("JX", "D:/tmp/w/jx/b/jx.exe")
 T = os.environ.get("JX_TMP", "D:/tmp/w/jx/t")
 JX_ARGS = os.environ.get("JX_ARGS", "").split()
+# jq itself, not chocolatey's `jq` shim: a timeout kills the shim only, and the real jq.exe it started kept looping (2026-11-15: two ran for 3 days)
+_CHOCO_JQ = "C:/ProgramData/chocolatey/lib/jq/tools/jq.exe"
+JQ = os.environ.get("JQ") or (_CHOCO_JQ if os.path.exists(_CHOCO_JQ) else "jq")
 os.makedirs(T + "/docs", exist_ok=True)
 
 def split_docs(path):
@@ -74,7 +77,7 @@ def early_exit_tail(doc, filt):
 
 def check(case):
     doc, flags, filt = case
-    erc, eout, _ = run("jq", flags, filt, doc)
+    erc, eout, _ = run(JQ, flags, filt, doc)
     eout = norm(eout)             # jq on Windows writes CRLF; jx writes LF
     grc, gout, gerr = run(JX, flags, filt, doc)
     if doc.startswith("rej_"): ok = grc != 0 and len(gerr) > 0 and len(gout) == 0   # jq accepts it, jx must refuse it (strict JSON, one document)
@@ -122,7 +125,7 @@ nrej = len(lines("reject.txt"))
 syn_ok = 0
 for filt in lines("syntax.txt"):
     with open(T + "/docs/simple.json", "rb") as f:
-        q = subprocess.run(["jq", "-c", filt], stdin=f, capture_output=True)
+        q = subprocess.run([JQ, "-c", filt], stdin=f, capture_output=True)
     with open(T + "/docs/simple.json", "rb") as f:
         p = subprocess.run([JX] + JX_ARGS + ["-c", filt], stdin=f, capture_output=True)
     if q.returncode == 3 and p.returncode == 3 and not p.stdout and b"syntax error" in p.stderr: syn_ok += 1
