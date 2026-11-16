@@ -13,6 +13,7 @@ Each is expected (listed in `tests/xdiff.txt`), never a test failure.
 | `--first`: a runtime error or invalid input after some results | no stdout, exit 5 | earlier results on stdout, exit 5 (the stream mode, the default, does as jq) |
 | Error messages | `jx: ...` with a byte position | `jq: error (at <stdin>:N): ...` with a line |
 | `input`, `inputs` | not supported yet | read the next value |
+| A caught `break` (`try (break $x) catch .`) in the second and later values | `{"__jq": N}` with the same N for every value | N counts label runs across the whole input |
 | A key with invalid UTF-8 matched by a filter key | compared as bytes | compared after replacement |
 | A non-ASCII character typed in the filter on Windows | mangled by the C runtime's narrow argv to `?` (jq too, from Git Bash): write `\u00e9` | same |
 | `tonumber` of `nan`, `Infinity`, `0x10` | an error | `nan` and `Infinity` are accepted |
