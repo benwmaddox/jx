@@ -471,7 +471,7 @@ fn built_of(doc: text, h: i64) -> i64 {
 
 fn reg_gen(r: i64) -> i64 {
     let ow = jj.f.r_own[r];
-    if ow < 0 { return 1; }
+    if ow < 0 { return jj.sc.dgen; }
     return jj.sc.ugen[ow];
 }
 

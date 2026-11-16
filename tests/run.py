@@ -171,17 +171,21 @@ exit_cases = [([".a |"], b'{"a":1}', 3), (["{a:"], b'{"a":1}', 3), ([".a.b"], b'
               ([".[]"], b'1', 5), (["walk(.)"], b'1', 1), ([".a", "-Z"], b'1', 2), ([".a"], b'{"a":1}', 0), (["--validate", ".a"], b'{"a":1} x', 5)]
 for args, doc, want in exit_cases:
     p = subprocess.run([JX] + JX_ARGS + ["-c"] + args, input=doc, capture_output=True)
-    if p.returncode == want and (want == 0 or (not p.stdout and p.stderr)): exit_ok += 1
+    # an error after a complete value prints that value's results first, as jq (`{"a":1} garbage`: 1, then the parse error)
+    out = b"1\n" if doc.startswith(b'{"a":1} ') else b""
+    if p.returncode == want and (want == 0 or (p.stdout.replace(b"\r\n", b"\n") == out and p.stderr)): exit_ok += 1
     else: failures.append("exit code: %s %r want %d got %d %r" % (args, doc, want, p.returncode, p.stderr[:60]))
-# --validate: reads the whole input and fails when anything follows the first value (jq: parse error, exit 2; jx exits 1)
+# a stream reads every value whole, as jq (a broken tail fails, exit 5); --first stops as soon as the filter is done with the first value
+# (early exit, the rest unread); --first --validate also fails when anything but white space follows the first value
+val_cases = ((b'{"a":{"x":1}}', ["--validate"], 0), (b'{"a":{"x":1},"b":garbage}', [], 5), (b'{"a":{"x":1},"b":[1,2', [], 5),
+             (b'{"a":{"x":1},"b":garbage}', ["--first"], 0), (b'{"a":{"x":1}} 2', ["--first", "--validate"], 5), (b'{"a":{"x":1}} {"a":{"x":2}}', [], 0))
 val_ok = 0
-for doc, flags, want_rc in ((b'{"a":{"x":1}}', ["--validate"], 0), (b'{"a":{"x":1},"b":garbage}', ["--validate"], 5), (b'{"a":{"x":1},"b":[1,2', ["--validate"], 5),
-                            (b'{"a":{"x":1},"b":garbage}', [], 0)):
+for doc, flags, want_rc in val_cases:
     p = subprocess.run([JX] + JX_ARGS + ["-c"] + flags + [".a.x"], input=doc, capture_output=True)
     if p.returncode == want_rc and (want_rc != 0 or True): val_ok += 1
     else: failures.append("validate: %r %s (rc=%d)" % (doc, flags, p.returncode))
 print("cases: %d against jq: %d pass, %d fail, %d expected differences (%d of them matched anyway); compile-time rejections: %d of %d ok; "
-      "syntax errors: %d of %d; options: %d of %d; exit codes: %d of %d; --validate: %d of 4" % (len(cases), pass_n, fail_n, xd_n, xd_match, rej_ok, nrej, syn_ok, nsyn, opt_ok, len(opt_cases), exit_ok, len(exit_cases), val_ok))
+      "syntax errors: %d of %d; options: %d of %d; exit codes: %d of %d; --validate/--first: %d of %d" % (len(cases), pass_n, fail_n, xd_n, xd_match, rej_ok, nrej, syn_ok, nsyn, opt_ok, len(opt_cases), exit_ok, len(exit_cases), val_ok, len(val_cases)))
 for r, n in sorted(by_reason.items(), key=lambda kv: -kv[1]): print("  expected difference observed: %5d  %s" % (n, r))
 open(T + "/early_exit_cases.txt", "w").write(chr(10).join(early_cases))
 open(T + "/failures.txt", "w").write(chr(10).join(failures))

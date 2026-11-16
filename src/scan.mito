@@ -123,7 +123,7 @@ fn elem_node(node: i64, k: i64) -> i64 {
 // the generation a slot of `node` must carry to be valid now
 fn gen_of(node: i64) -> i64 {
     let ow = jj.f.owner[node];
-    if ow < 0 { return 1; }
+    if ow < 0 { return jj.sc.dgen; }
     return jj.sc.ugen[ow];
 }
 
@@ -180,7 +180,7 @@ fn value_done(doc: text, filter: text, node: i64, tag: i64, a: i64, b: i64, cnt:
             jj.sc.sisint[node] = 0;
             if isint { jj.sc.sisint[node] = 1; jj.sc.sint[node] = ival; }
         }
-        if jj.f.owner[node] < 0 && jj.sc.nfilled == jj.f.nwant && jj.sc.exit_depth == 0 && !jj.sc.validate { jj.sc.exit_depth = jj.sc.sp; }
+        if jj.f.owner[node] < 0 && jj.sc.nfilled == jj.f.nwant && jj.sc.exit_depth == 0 && !jj.sc.validate && (jj.first || jj.sc.selective) { jj.sc.exit_depth = jj.sc.sp; }
     }
     if jj.f.sc1[node] >= 0 {
         let rc = run_unit(doc, filter, node);
@@ -231,9 +231,12 @@ fn key_depth(node: i64) -> i64 {
 // --selective: the position after the container whose opening bracket is at p, found 64 bytes at a time by counting brackets outside strings.
 // Nothing inside is checked (as simdjson's On-Demand skips a value): only where strings start and end, a backslash escaping the byte after it.
 // -1 with jj.err set when the input ends first.
-fn skip_container(doc: text, p: i64) -> i64 {
+fn skip_container(doc: text, p: i64) -> i64 { return skip_from(doc, p, 0); }
+
+// the position after the `depth0` containers open at p (p outside any string) close; skip_container with depth0 0 starts at the opening bracket
+fn skip_from(doc: text, p: i64, depth0: i64) -> i64 {
     var i = p;
-    var depth = 0;
+    var depth = depth0;
     var instr = 0;      // 1 when this block starts inside a string
     var carry = 0;      // 1 when this block's first byte is escaped (the last block ended with a backslash that escapes)
     while i < len(doc) {
@@ -258,7 +261,7 @@ fn skip_container(doc: text, p: i64) -> i64 {
         let closes = ((v == 125) | (v == 93)).mask();
         let o = opens ^ (opens & inside);
         let c = closes ^ (closes & inside);
-        if c.popcount() < depth {
+        if depth > 0 && c.popcount() < depth {
             depth += o.popcount() - c.popcount();
         } else {
             var s = o | c;
@@ -277,13 +280,111 @@ fn skip_container(doc: text, p: i64) -> i64 {
     return fail_at("unfinished JSON term", len(doc));
 }
 
-// the whole document: 0, or 1 with jj.err set
+// The input is a stream of values, as jq reads it: the filter runs once per value and the results come out in order. NDJSON is one
+// value per line; white space between values is optional where the end of a value is clear (`[1][2]`, `{"a":1}"b"`), a comma or a
+// token run-on (`1true`) is an error. Per value everything the engine holds is reset (new_value). An error of the filter in one value
+// is reported on standard error after that value's earlier results, and the next value is read (the exit code is the last value's);
+// a parse error or a limit stops: the results of the broken value are taken back, those of earlier values stand.
+// --first reads only the first value and stops as soon as the filter is done with it (the single-document mode, early exit included).
+// 0, or 1 with jj.err set
 fn scan(doc: text, filter: text) -> i64 {
-    var u = 0;
-    while u < jj.f.nn { jj.sc.ugen[u] = 1; u += 1; }
     var p = skip_ws(doc, 0);
     if byte_at(doc, 0) == 239 && byte_at(doc, 1) == 187 && byte_at(doc, 2) == 191 { p = skip_ws(doc, 3); }   // a byte order mark
     if p >= len(doc) { return 0; }
+    while true {
+        new_value();
+        // this value's output, taken back if the value turns out broken
+        jj.o.open = false;
+        let o_len = len(jj.o.text);
+        let o_res = jj.o.results;
+        let o_sep = jj.o.sep;
+        let o_last = jj.o.lastpos;
+        if jj.uses_inl { jj.inl = jj.lfbase + lines_before(doc, p); }
+        var e = scan_value(doc, filter, p);
+        if e >= 0 && !jj.first { e = after_value(doc, e); }
+        if e < 0 {
+            jj.o.text = substr(jj.o.text, 0, o_len);
+            jj.o.results = o_res;
+            jj.o.sep = o_sep;
+            jj.o.lastpos = o_last;
+            // input in pieces: a value that runs into the end of the piece is not broken but cut; it is read again with the next piece
+            if jj.more && jj.sc.perr && jj.sc.perr_at >= len(doc) {
+                jj.sc.perr = false;
+                jj.err = "";
+                jj.part = p;
+                return 2;
+            }
+            return 1;
+        }
+        if jj.sc.rt {
+            res_cut();
+            flush_out();
+            eprint(jj.rterr + "
+");
+            jj.vstatus = 5;
+        } else { jj.vstatus = 0; }
+        if jj.first { return 0; }
+        if len(jj.o.text) > 1048576 { flush_out(); }
+        p = e;
+        if p >= len(doc) { return 0; }
+    }
+    return 0;
+}
+// (scan returns 2 only for input in pieces: the value at jj.part runs past the end of the piece)
+
+// per value: a fresh generation for the document-level slots and registers (everything an earlier value left is stale at once),
+// empty arenas and scratch text, no pending error
+fn new_value() {
+    var g = jj.sc.dgen;
+    var u = 0;
+    while u < jj.f.nn { if jj.sc.ugen[u] > g { g = jj.sc.ugen[u]; } u += 1; }
+    g += 1;
+    jj.sc.dgen = g;
+    u = 0;
+    while u < jj.f.nn { jj.sc.ugen[u] = g; u += 1; }
+    jj.sc.sp = 0;
+    jj.sc.nfilled = 0;
+    jj.sc.exit_depth = 0;
+    jj.sc.anyerr = false;
+    jj.sc.dead = false;
+    jj.sc.rt = false;
+    var d = 0;
+    while d < 4 { jj.v.top[d] = jj.v.base[d]; d += 1; }
+    jj.ev.scr = "";
+    jj.ev.ptx = "";
+    jj.ev.err = 0;
+    jj.ev.depth = 0;
+}
+
+// after a value that ended at e: the start of the next value (or the end of the input), -1 with jj.err set for a comma, a closing
+// bracket or a token run-on (`1true`, `nulll`)
+fn after_value(doc: text, e: i64) -> i64 {
+    let c = byte_at(doc, e);
+    if c < 0 { return e; }
+    if c == 44 || c == 58 || c == 93 || c == 125 { return fail_at("unexpected character between values", e); }
+    let prev = byte_at(doc, e - 1);
+    let ended = prev == 34 || prev == 93 || prev == 125;
+    let ws = c == 32 || c == 9 || c == 10 || c == 13;
+    if !ended && !ws && c != 34 && c != 91 && c != 123 { return fail_at("invalid token", e); }
+    return skip_ws(doc, e);
+}
+
+// an error while a value is read: a parse error, a limit, or --first stops the input (true); an error of the filter is kept for the
+// end of the value, and the rest of the value is only checked (every open container and everything after it read without the filter)
+fn value_error() -> bool {
+    if jj.sc.perr || jj.exitc != 5 || jj.first { return true; }
+    if !jj.sc.rt { jj.sc.rt = true; jj.rterr = jj.err; }
+    jj.err = "";
+    jj.ev.err = 0;
+    var k = 1;
+    while k <= jj.sc.sp { jj.sc.fnode[k] = -1; k += 1; }
+    jj.sc.dead = true;
+    return false;
+}
+
+// one value from p: the position after it, or -1 with jj.err set
+fn scan_value(doc: text, filter: text, p0: i64) -> i64 {
+    var p = p0;
     var node = 0;
     var mode = 0;                 // 0 a value starts here, 1 a value ended, 2 a key starts here
     while true {
@@ -293,7 +394,7 @@ fn scan(doc: text, filter: text) -> i64 {
             if (c == 123 || c == 91) && node < 0 && jj.sc.selective {
                 // a container nobody reads: skipped whole
                 let e = skip_container(doc, p);
-                if e < 0 { return 1; }
+                if e < 0 { return -1; }
                 p = e;
                 mode = 1;
             } else if c == 123 || c == 91 {
@@ -315,13 +416,13 @@ fn scan(doc: text, filter: text) -> i64 {
                 if tag == 7 {
                     if d == 125 {
                         p += 1;
-                        if close_frame(doc, filter, p) != 0 { return 1; }
+                        if close_frame(doc, filter, p) != 0 { if value_error() { return -1; } }
                         mode = 1;
                     } else { mode = 2; }
                 } else {
                     if d == 93 {
                         p += 1;
-                        if close_frame(doc, filter, p) != 0 { return 1; }
+                        if close_frame(doc, filter, p) != 0 { if value_error() { return -1; } }
                         mode = 1;
                     } else {
                         jj.sc.fcnt[sp] = 1;
@@ -349,9 +450,9 @@ fn scan(doc: text, filter: text) -> i64 {
                 } else {
                     return fail_at("unexpected character, expected a value", p);
                 }
-                if e < 0 { return 1; }
+                if e < 0 { return -1; }
                 if node >= 0 && (jj.f.nkeys[node] != 0 || jj.f.nidx[node] != 0) { mark_nav(node, tag); }
-                if value_done(doc, filter, node, tag, p, e, 0, esc, isint, ival) != 0 { return 1; }
+                if value_done(doc, filter, node, tag, p, e, 0, esc, isint, ival) != 0 { if value_error() { return -1; } }
                 p = e;
                 mode = 1;
             }
@@ -360,7 +461,7 @@ fn scan(doc: text, filter: text) -> i64 {
             let sp = jj.sc.sp;
             if byte_at(doc, p) != 34 { return fail_at("object keys must be strings", p); }
             let e = scan_string(doc, p);
-            if e < 0 { return 1; }
+            if e < 0 { return -1; }
             let esc = jj.sc.esc;
             let kn = jj.sc.fnode[sp];
             jj.sc.fcnt[sp] += 1;
@@ -382,7 +483,7 @@ fn scan(doc: text, filter: text) -> i64 {
                 }
                 if jj.f.wantkeys[kn] != 0 {
                     let h = ar_alloc(key_depth(kn));
-                    if h < 0 { return 1; }
+                    if h < 0 { return -1; }
                     jj.v.vt[h] = 5;
                     jj.v.vs[h] = 0;
                     jj.v.va[h] = p;
@@ -400,11 +501,20 @@ fn scan(doc: text, filter: text) -> i64 {
             mode = 0;
         } else {
             // a value ended
-            if jj.sc.exit_depth > 0 && jj.sc.sp < jj.sc.exit_depth && jj.sc.sp > 0 { break; }
+            if jj.sc.exit_depth > 0 && jj.sc.sp < jj.sc.exit_depth && jj.sc.sp > 0 {
+                // every slot is filled: --first stops here; in a stream (--selective) the rest of the value is skipped to its end
+                if !jj.first {
+                    p = skip_from(doc, p, jj.sc.sp);
+                    if p < 0 { return -1; }
+                }
+                break;
+            }
             let sp = jj.sc.sp;
+            if sp == 0 && !jj.first { break; }   // the value ended at p
             p = skip_ws(doc, p);
             if sp == 0 {
-                if p < len(doc) { return fail_at("more than one JSON value on the input (jx reads one document)", p); }
+                // --first does not look at what follows the value; with --validate it must be white space only
+                if p < len(doc) && jj.sc.validate { return fail_at("more than one JSON value on the input (--first --validate reads one document)", p); }
                 break;
             }
             let c = byte_at(doc, p);
@@ -421,7 +531,7 @@ fn scan(doc: text, filter: text) -> i64 {
                 }
             } else if (c == 125 && kind == 7) || (c == 93 && kind == 6) {
                 p += 1;
-                if close_frame(doc, filter, p) != 0 { return 1; }
+                if close_frame(doc, filter, p) != 0 { if value_error() { return -1; } }
             } else if c < 0 {
                 return fail_at("unfinished JSON term", p);
             } else {
@@ -429,5 +539,6 @@ fn scan(doc: text, filter: text) -> i64 {
             }
         }
     }
-    return run_root(doc, filter);
+    if !jj.sc.dead && run_root(doc, filter) != 0 { if value_error() { return -1; } }
+    return p;
 }

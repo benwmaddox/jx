@@ -117,6 +117,11 @@ struct Scan {
     isint: bool;
     anyerr: bool;                 // a navigation error was recorded in this run
     validate: bool;
+    dgen: i64;                    // the generation of the document-level slots and registers: one per value of the input stream
+    perr: bool;                   // the error being reported is a parse error (fail_at): the input stops
+    perr_at: i64;                 // where (a parse error at the end of a piece, with more input to come, is a value cut by the piece)
+    rt: bool;                     // an error of the filter happened in this value (reported when the value is complete)
+    dead: bool;                   // after it: the rest of the value is only checked, nothing runs
     selective: bool;              // --selective: a container the filter does not read is skipped by counting brackets, not checked (scan.mito, skip_container)
     fnode: i64[10002];            // per open container: its automaton node, -1 when skipped
     fkind: i64[10002];            // 6 array, 7 object
@@ -155,6 +160,11 @@ struct Out {
     ascii: bool;                  // -a: non-ASCII characters written as escapes
     seq: bool;                    // --seq: a record separator (U+001E) before each result
     lastpos: i64;                 // where the last result starts in text (-e)
+    open: bool;                   // a result is being written (an error now leaves it partial: res_cut takes it back)
+    cut: i64;                     // where it starts, and the state before it
+    cut_sep: bool;
+    cut_res: i64;
+    cut_last: i64;
 }
 
 // two numbers being compared, as decimals
@@ -270,6 +280,19 @@ struct J {
     ps_l: i64[32];
     posmode: i64;                 // 0 files, 1 --args, 2 --jsonargs
     slurp: bool;                  // -s: the input document is wrapped in an array
+    first: bool;                  // --first: the input is one value; stop as soon as the filter is done with it
+    rterr: utf8<300>;             // the error of the filter in the current value
+    vstatus: i64;                 // 5 when the last value ended with an error of the filter, else 0 (the exit code follows it, as jq's)
+    uses_inl: bool;               // the filter reads input_line_number: worked out per value
+    lfp: i64;                     // input_line_number per value: line feeds counted up to lfp (lfn of them, the last one ending at lfls)
+    lfn: i64;
+    lfls: i64;
+    flushed: i64;                 // results already written to standard output
+    lastnf: bool;                 // the last result written out was null or false (-e)
+    more: bool;                   // standard input read in pieces: more input follows the text being scanned
+    part: i64;                    // where the value cut by the end of a piece starts (scan returns 2)
+    lfbase: i64;                  // line feeds in the pieces already done (input_line_number)
+    carry: utf8<268435456>;       // the start of a value cut by the end of a piece, read again with the next piece (256 MiB at most)
     help: i64;                    // 1 --help or -h, 2 --version or -V: print and stop before anything is read
     fromfile: bool;               // -f: the first argument that is not an option names the file the filter is in
     rawin: bool;                  // -R: the input is text, not JSON
@@ -446,6 +469,7 @@ fn parse_opts(args: text) -> i64 {
                 else if arg_is(args, s, e, "--raw-output") { jj.o.raw = true; }
                 else if arg_is(args, s, e, "--validate") { jj.sc.validate = true; }
                 else if arg_is(args, s, e, "--selective") { jj.sc.selective = true; }
+                else if arg_is(args, s, e, "--first") { jj.first = true; }
                 else if arg_is(args, s, e, "--dump-program") { jj.dump = true; }
                 else if arg_is(args, s, e, "--explain") { jj.dump = true; jj.explain = true; }
                 else if arg_is(args, s, e, "--null-input") { jj.nullin = true; }
@@ -530,7 +554,7 @@ fn parse_opts(args: text) -> i64 {
 fn help_text() -> text {
     return "Usage: jx [OPTIONS] FILTER [FILE]\n"
         + "jx reads one JSON document (standard input, or one file) in a single pass and runs a jq filter over it.\n\n"
-        + "Options (see the README for the exact list): -c -r -j -a -s -n -e --tab --indent N --arg --argjson --args --jsonargs --seq --validate --selective -h -V\n"
+        + "Options (see the README for the exact list): -c -r -j -a -s -n -e --tab --indent N --arg --argjson --args --jsonargs --seq --validate --selective --first -h -V\n"
         + "Not supported (exit 1 or 2): regex, walk, path functions, assignment, recursive descent, dates, modules, -S, -C.\n";
 }
 
@@ -582,6 +606,70 @@ fn count_lf(t: text) -> i64 {
 
 // jq reads its input a line at a time (pieces of at most 4095 bytes) and input_line_number counts the pieces ending in a line feed
 // that it has fed to the parser when the first value is complete (a number or a literal is complete at the byte after it)
+// input_line_number for the value at p of a stream: as lines_read does for the first value, with the line feeds before it counted once
+// for the whole stream (from where the last value's count stopped)
+fn lines_before(doc: text, p: i64) -> i64 {
+    let n = len(doc);
+    let e = val_end(doc, p);
+    let c = byte_at(doc, p);
+    var t = e - 1;
+    if c != 34 && c != 91 && c != 123 && e < n { t = e; }
+    if t < jj.lfp { jj.lfp = 0; jj.lfn = 0; jj.lfls = 0; }
+    var i = jj.lfp;
+    while i < t {
+        if byte_at(doc, i) == 10 { jj.lfn += 1; jj.lfls = i + 1; }
+        i += 1;
+    }
+    jj.lfp = t;
+    var le = t;
+    while le < n && byte_at(doc, le) != 10 { le += 1; }
+    if le >= n { return jj.lfn; }
+    if (t - jj.lfls) / 4095 == (le - jj.lfls) / 4095 { return jj.lfn + 1; }
+    return jj.lfn;
+}
+
+// -s over a stream of several values: every value as the elements of one array (the values are only split here; the scanner checks
+// the array as it reads it). At most 16 MiB for now (a text built in a function); one value of any size takes the `[.]` path instead.
+fn one_value(doc: text) -> bool {
+    var p = skip_ws(doc, 0);
+    if byte_at(doc, 0) == 239 && byte_at(doc, 1) == 187 && byte_at(doc, 2) == 191 { p = skip_ws(doc, 3); }
+    return skip_ws(doc, val_end(doc, p)) >= len(doc);
+}
+
+fn slurp_text(doc: text) -> text {
+    if len(doc) > 16777000 {
+        jj.exitc = 1;
+        jj.err = "jx: not supported yet: -s over more than one value of more than 16 MiB in all";
+        jj.bad = true;
+        return "";
+    }
+    var r: text<16777216> = "[";
+    var p = skip_ws(doc, 0);
+    if byte_at(doc, 0) == 239 && byte_at(doc, 1) == 187 && byte_at(doc, 2) == 191 { p = skip_ws(doc, 3); }
+    var k = 0;
+    while p < len(doc) {
+        let e = val_end(doc, p);
+        if k > 0 { r += ","; }
+        r += substr(doc, p, e - p);
+        k += 1;
+        p = skip_ws(doc, e);
+    }
+    r += "]";
+    return r;
+}
+
+// the output so far to standard output (results of complete values; the area is reused)
+fn flush_out() {
+    if jj.o.results > jj.flushed {
+        let last = substr(jj.o.text, jj.o.lastpos, len(jj.o.text) - jj.o.lastpos);
+        jj.lastnf = last == "null" || last == "false";
+        jj.flushed = jj.o.results;
+    }
+    if len(jj.o.text) > 0 { print(jj.o.text); }
+    jj.o.text = "";
+    jj.o.lastpos = 0;
+}
+
 fn lines_read(doc: text) -> i64 {
     let n = len(doc);
     var p = skip_ws(doc, 0);
@@ -692,7 +780,7 @@ fn read_input(prog: text) -> text {
     if jj.bad { return ""; }
     if !jj.rawin {
         if text_has(prog, "input_line_number") {
-            if jj.slurp { jj.inl = count_lf(raw); } else { jj.inl = lines_read(raw); }
+            if jj.slurp { jj.inl = count_lf(raw); } else if jj.first { jj.inl = lines_read(raw); } else { jj.uses_inl = true; }
         }
         return raw;
     }
@@ -739,13 +827,18 @@ fn main(args: utf8<0..1048576> from args, env: utf8<0..1048576> from env) -> Res
         if jj.bad { rc = 1; }
         if rc == 0 {
             if jj.nullin || jj.dump { rc = go(prog, "null"); }
+            else if jj.nfile == 0 && !jj.rawin && !jj.slurp && !jj.first && stdin_wants_pieces() { rc = go_pieces(prog); }
             else {
                 let doc = read_input(prog);
                 if jj.bad { rc = 1; }
                 else if jj.slurp && !jj.rawin {
                     // -s: the one document becomes the only element of an array (no input at all: an empty array); a second value is the usual error
                     if skip_ws(doc, 0) >= len(doc) { rc = go(prog, "[]"); }
-                    else { rc = go("[.] | (" + prog + ")", doc); }
+                    else if jj.first || one_value(doc) { rc = go("[.] | (" + prog + ")", doc); }
+                    else {
+                        let all = slurp_text(doc);
+                        if jj.bad { rc = 1; } else { rc = go(prog, all); }
+                    }
                 } else { rc = go(prog, doc); }
             }
         }
@@ -755,18 +848,29 @@ fn main(args: utf8<0..1048576> from args, env: utf8<0..1048576> from env) -> Res
         if jj.estatus && !jj.dump {
             if jj.o.results == 0 { code = 4; }
             else {
-                let last = substr(jj.o.text, jj.o.lastpos, len(jj.o.text) - jj.o.lastpos);
-                if last == "null" || last == "false" {
+                var lastnf = jj.lastnf;
+                if jj.o.results > jj.flushed {
+                    let last = substr(jj.o.text, jj.o.lastpos, len(jj.o.text) - jj.o.lastpos);
+                    lastnf = last == "null" || last == "false";
+                }
+                if lastnf {
                     code = 1;
                     if jj.o.raw { return exit_error(5, "jx: error: with -e and raw output the last result null or false cannot be told from the string\n"); }
                 }
             }
         }
         if jj.o.results > 0 && !jj.o.nonl { jj.o.text += "\n"; }
+        if jj.vstatus == 5 { code = 5; }   // the last value ended with an error of the filter (reported already)
+        flush();
+        if code == 5 { return exit(5, jj.o.text); }
         if code == 1 { return exit(1, jj.o.text); }
         if code == 4 { return exit(4, jj.o.text); }
         return ok(jj.o.text);
     }
+    // the results of the values before the one that failed stand (those of the failed one were taken back)
+    if jj.o.results > 0 && !jj.o.nonl { jj.o.text += "\n"; }
+    if len(jj.o.text) > 0 { print(jj.o.text); }
+    flush();
     if jj.exitc == 2 { return exit_error(2, jj.err + "\n"); }
     if jj.exitc == 3 { return exit_error(3, jj.err + "\n"); }
     if jj.exitc == 5 { return exit_error(5, jj.err + "\n"); }
@@ -774,15 +878,67 @@ fn main(args: utf8<0..1048576> from args, env: utf8<0..1048576> from env) -> Res
 }
 
 fn go(filter: text, doc: text) -> i64 {
-    num_init();
-    ev_init();
-    if compile(filter) != 0 { return 1; }
-    if lower_prog() != 0 { return 1; }
+    if prepare(filter) != 0 { return 1; }
     if jj.dump {
         if jj.explain { explain_program(filter); } else { dump_program(filter); }
         return 0;
     }
     return scan(doc, filter);
+}
+
+fn prepare(filter: text) -> i64 {
+    num_init();
+    ev_init();
+    if compile(filter) != 0 { return 1; }
+    if lower_prog() != 0 { return 1; }
+    return 0;
+}
+
+// Standard input that is not a file stdin_text can map (a pipe, a terminal, Windows, more than 4 GiB): read in pieces of 16 MiB, so input of
+// any size runs in fixed memory. Each piece is cut after its last line feed (no JSON token holds a raw line feed); the complete values of
+// what is carried plus the piece run as a stream, and a value the cut splits is carried to the next piece and read again from its start.
+fn stdin_wants_pieces() -> bool {
+    let n = stdin_size();
+    return n < 0 || n > 4294000000;
+}
+
+fn go_pieces(filter: text) -> i64 {
+    if prepare(filter) != 0 { return 1; }
+    jj.uses_inl = text_has(filter, "input_line_number");
+    jj.carry = "";
+    jj.more = true;
+    var rc = 1;
+    while rc == 1 { rc = piece(filter); }
+    return rc;
+}
+
+// one piece: 1 more to read, 0 done, 2 an error (jj.err set)
+fn piece(filter: text) -> i64 {
+    let t = stdin_next(16777216);
+    if len(t) == 0 {
+        // the end: what is carried is the last value or values, now read to the end
+        jj.more = false;
+        if len(jj.carry) == 0 { return 0; }
+        let last = jj.carry + "";
+        jj.carry = "";
+        if scan(last, filter) != 0 { return 2; }
+        return 0;
+    }
+    var cut = len(t);
+    while cut > 0 && byte_at(t, cut - 1) != 10 { cut -= 1; }
+    let doc = jj.carry + substr(t, 0, cut);
+    var keep = len(doc);
+    let r = scan(doc, filter);
+    if r == 1 { return 2; }
+    if r == 2 { keep = jj.part; }
+    if jj.uses_inl { jj.lfbase += count_lf(substr(doc, 0, keep)); jj.lfp = 0; jj.lfn = 0; jj.lfls = 0; }
+    if len(doc) - keep + len(t) - cut > 268435000 {
+        jj.exitc = 1;
+        jj.err = "jx: a value of more than 256 MiB in input read in pieces (a pipe): not supported yet; give the file as an argument or with <";
+        return 2;
+    }
+    jj.carry = substr(doc, keep, len(doc) - keep) + substr(t, cut, len(t) - cut);
+    return 1;
 }
 
 use "util.mito";

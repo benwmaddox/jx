@@ -432,3 +432,22 @@ fn write_slot(doc: text, n: i64, depth: i64) -> i64 {
     write_container(doc, a, b, depth);
     return 0;
 }
+
+// a result starts: remember where, so an error before it ends can take it back (a stream reports the error and goes on)
+fn res_begin() {
+    jj.o.open = true;
+    jj.o.cut = len(jj.o.text);
+    jj.o.cut_sep = jj.o.sep;
+    jj.o.cut_res = jj.o.results;
+    jj.o.cut_last = jj.o.lastpos;
+}
+
+// an error stopped the value: a result left half written is taken back
+fn res_cut() {
+    if !jj.o.open { return; }
+    jj.o.text = substr(jj.o.text, 0, jj.o.cut);
+    jj.o.sep = jj.o.cut_sep;
+    jj.o.results = jj.o.cut_res;
+    jj.o.lastpos = jj.o.cut_last;
+    jj.o.open = false;
+}

@@ -50,3 +50,22 @@ true
 [{"a":1,"b":[7]},[4,5],3,null,{"a":[9]},[{"a":1},[2]],"s"]
 ### mixed_objs
 [{"a":1},[4],{"a":{"b":2}},[[5]],{"b":3}]
+### s_ndjson
+{"users":[{"n":"ann","age":31,"tags":["a"],"addr":{"city":"Austin"}}],"total":1,"ok":true}
+{"users":[{"n":"bo","age":17,"tags":[],"addr":{"city":"Boston"}},{"n":"cy","age":45,"tags":["x","y"],"addr":{}}],"total":2,"ok":false}
+{"users":[],"total":0,"ok":null}
+### s_mixed
+1 "a" [1,2] {"a":1}{"a":2} null true [{"a":[3]}]"s"-4.5e1
+### s_ws
+  {"a":1}
+
+	{"a":{"b":[1,2]}}   
+
+{"users":[{"n":"z","age":1}]}
+### s_shapes
+{"a":1,"users":[{"n":"q","age":5}]}
+[1,2,3]
+"text"
+{"users":{"n":"not an array"}}
+{"users":[{"n":"r","age":"old"}]}
+42

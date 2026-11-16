@@ -78,3 +78,17 @@ hello
 {"a":1} {"a":2}
 ### rej_two_scalars
 1 2
+### s_bad_third
+{"users":[{"n":"a","age":1}]}
+{"users":[{"n":"b","age":2}]}
+{"users":[{"n":"c","age":
+### s_comma
+{"a":1},{"a":2}
+### s_runon
+1true
+### s_runon_lit
+{"a":1} nulll
+### s_bad_mid_tail
+{"users":[{"n":"a","age":1}],"x":[1,2]}
+{"users":[{"n":"b","age":2}],"x":[1,,2]}
+{"users":[{"n":"c","age":3}]}

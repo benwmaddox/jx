@@ -15,9 +15,19 @@ echo '{"users":[{"n":"ann","age":91},{"n":"bo","age":7}]}' | ./jx.exe -c '.users
 "ann"
 ```
 
-jx reads one document (standard input, or one input file) and takes the filter as its first argument; flags are `-c` (compact; the default is jq's
-indented output), `-r` (a string result is written raw) and `--validate` (below). Results are written after the whole document has been read; an error
-writes a message to standard error and exits with 1 (jq uses 2, 3 and 5), with nothing on standard output.
+jx reads a stream of JSON values, as jq does (standard input, or one input file): NDJSON (one value per line), or values separated by white
+space or by nothing where the end is clear (`1 "a" [1][2]{"a":3}`). The filter runs once per value and the results come out in order, written as
+each value finishes. The filter is the first argument; flags are `-c` (compact; the default is jq's indented output), `-r` (a string result is written
+raw), `--selective`, `--first` and `--validate` (below). An error of the filter in one value goes to standard error after that value's earlier results,
+and the next value is read; the exit code is the last value's (5 if the filter failed on it), as in jq. A parse error stops: the results of the values
+before it stand, the broken value's are dropped, exit 5. Other errors exit with 1 (jq uses 2, 3 and 5).
+
+**Streams, pipes and large input.** A file (an argument, or `< file`) is mapped, not copied (Linux), up to 4 GiB. Standard input that is not such a
+file (a pipe, Windows, more than 4 GiB) is read in pieces of 16 MiB (Mitochondria's `stdin_next`), so any amount of input runs in fixed memory:
+2.9 GB of GH Archive through `cat |` takes 42 MB. A value may span pieces (a pretty-printed document is fine) up to 256 MiB.
+`--first` reads only the first value and stops as soon as the filter is done with it, without reading the rest (the old single-document mode:
+`.users[0].n` of a 529 MB document reads a few bytes); `--first --validate` also checks that only white space follows. `-s` collects every value
+into one array (one value of any size; several values up to 16 MiB in all for now).
 
 **Options.** jx parses its own arguments (the program takes the runtime's raw `args`), so an option is understood or refused wherever it is written, before or
 after the filter, long or short, combined (`-cr`): `-c`, `-r`, `-j`, `-n`, `-e`, `-s`/`--slurp`, `-a`/`--ascii-output`, `--seq`, `-M`, `--tab`, `--indent n`, `--arg`,
@@ -26,13 +36,12 @@ and `--dump-program` are built; every other jq option is a hard error before any
 --stream-errors --sort-keys --color-output --raw-output0 --library-path --binary --build-configuration --strict`), `jx: unknown option '--bogus'` for anything else.
 Standard input is read only when the filter needs it (`stdin_text`, a Mitochondria runtime feature): `-n`, `--explain`, `--dump-program`, `--help`, `--version` and a
 run with an input file never wait for it. `jx --version` prints `jx 0.1` (jq prints `jq-1.8.2`); `--help` prints a short usage text of jx's own.
-`-s` wraps the one document in an array (no input at all gives `[]`); a second value is the usual "more than one JSON value" error, so `-s` over several
-documents fails instead of answering. `-a` writes every character above 127 as a `u`-escape (and with `-r` a string is still written quoted, as jq does); `--seq` writes
+`-s` collects every value into one array (no input at all gives `[]`; several values up to 16 MiB in all for now, one value of any size). `-a` writes every character above 127 as a `u`-escape (and with `-r` a string is still written quoted, as jq does); `--seq` writes
 a record separator (U+001E) before each result. `-S` is refused because document values are copied as spans and never parsed, so keys cannot be sorted
 without parsing every object; `-C` because the writer copies spans; `-L` (modules) by owner scope.
 
-**Input files.** `jx FILTER FILE` reads the file as the document (`-` is standard input). jx reads one document, so exactly one file is accepted; a second one is
-`jx: not supported yet: more than one input file` (exit 2), and so is a file holding several values (the usual "more than one JSON value" error). A file that
+**Input files.** `jx FILTER FILE` reads the file as the document (`-` is standard input). One file is accepted; a second one is
+`jx: not supported yet: more than one input file` (exit 2). A file may hold any number of values (a stream). A file that
 cannot be opened is `jx: error: Could not open file NAME: No such file or directory` (exit 2, as jq; jq's text starts with `jq:`). `-n` never opens the file.
 `-f FILE` / `--from-file FILE` reads the filter from a file (jq's flag takes the first plain argument as the file name: `jx -f prog.jq data.json`); the filter
 may have `#` comments and any whitespace, with jq 1.8's rule that a comment goes on past a line break preceded by an odd number of backslashes (also before CRLF); comments are
@@ -75,8 +84,9 @@ Details that matter:
   (no list is kept). A scope whose body uses a variable bound outside it, or that is not at the head of the filter, collects its results in a register (an arena list) and plays them back when the
   document has been read, so the outer value is complete when the rest of the filter runs; the register's memory is linear in the collected values.
 - **Last key wins** (jq's rule for duplicate keys): a repeated key forgets what the earlier occurrence filled. A repeat of a named key on a path that is being streamed is an error, not a silent difference.
-- **Early exit** (design decisions 2 and 3): a filter with no `[]` stops after the container that held its last filled value ends, and the unread tail is not validated. `--validate` reads and validates to the end
-  and fails (exit 1; jq exits 2) when anything but white space follows the first value.
+- **Early exit** (design decisions 2 and 3): with `--first`, a filter with no `[]` stops after the container that held its last filled value ends, and the
+  unread tail is not validated; `--first --validate` reads to the end and fails when anything but white space follows. In a stream (the default) each
+  value is read whole, as jq does, so a broken tail fails that value; with `--selective` the rest of the value is skipped once the filter has what it needs.
 - **Checked by default, `--selective` on request.** By default every value the scanner passes is checked as strict JSON (numbers, escapes, literals,
   brackets), also inside objects and arrays the filter never reads, so an invalid document fails as it does in jq. `--selective` skips an object or array
   the filter does not read by counting brackets outside strings, 64 bytes at a time, without checking what is inside (simdjson's On-Demand does the same):
@@ -94,9 +104,11 @@ Details that matter:
 | --- | --- | --- |
 | Duplicate keys inside a copied object, `length` of an object with duplicate keys (decision 1) | copied as written, counted twice | keeps the last, one key |
 | Early exit with a damaged tail, or an outer repeated key after the exit point (decisions 2, 3) | answers | rejects the document / uses the last key |
-| `NaN`, `Infinity`, `01`, `1.`, `.5`, `+1`, more than one top-level value | rejected (strict JSON, one document) | accepted |
+| `NaN`, `Infinity`, `01`, `1.`, `.5`, `+1` | rejected (strict JSON) | accepted |
 | `.[]` over an object with duplicate keys | every value | only the last one per key (needs buffering) |
-| Runtime error or invalid input after some results | no stdout, exit 5 | earlier results on stdout, exit 5 |
+| `--first`: a runtime error or invalid input after some results | no stdout, exit 5 | earlier results on stdout, exit 5 (the stream mode, the default, does as jq) |
+| Error messages | `jx: ...` with a byte position | `jq: error (at <stdin>:N): ...` with a line |
+| `input`, `inputs` | not supported yet | read the next value |
 | A key with invalid UTF-8 matched by a filter key | compared as bytes | compared after replacement |
 | A non-ASCII character typed in the filter on Windows | mangled by the C runtime's narrow argv to `?` (jq too, from Git Bash): write `\u00e9` | same |
 | `tonumber` of `nan`, `Infinity`, `0x10` | an error | `nan` and `Infinity` are accepted |
