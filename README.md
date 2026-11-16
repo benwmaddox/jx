@@ -135,21 +135,30 @@ Computed indexes (`.[$k]`, `.[expr]`, negative literal indexes) stay rejected in
 
 ## Results
 
-**Byte vectors, `--selective`, mapped input (branch simd-scan, 2026-11-15).** Needs Mitochondria v0.1.0 or later (byte vectors and mapped input, #55;
-the Linux text-area fix, #54). GH Archive 2024-01-15 hours 12-14 as one array (2.9 GB, 827,068 events),
-`.[] | select(.type == "WatchEvent") | .repo.name`, WSL on a Core Ultra 9 185H, one core, best of 5, the file in the page cache, all in one session
-(the machine's speed changed between sessions: compare within the table). Every jx run prints jq's 28,483 lines byte for byte. Times are whole runs.
+**Benchmark: GH Archive stars (jx v0.1.0, 2026-11-15).** Every `WatchEvent`'s `repo.name` from 3 hours of GH Archive (2024-01-15, hours 12-14:
+2.9 GB, 827,068 events). Each row is a whole run: start, reading the file, scanning, printing. One core of a Core Ultra 9 185H (WSL 2, Linux),
+file in the page cache, best of 5 (jq, jaq and gojq: best of 3). Every tool finds the same 28,483 stars. Reproduce with `bench/gharchive/run.sh`.
 
-| jx build | checked (default) | `--selective` |
-| --- | --- | --- |
-| before (one byte at a time, input copied) | 4.67 s (0.62 GB/s) | |
-| byte vectors, input copied | 2.69 s | 1.97 s |
-| byte vectors, input mapped (Linux), default CPU | 1.65 s | 0.86 s |
-| the same, `CPU=x86-64-v2` | 1.65 s | 0.79 s |
-| the same, `CPU=x86-64-v3` (AVX2) | 1.52 s (1.91 GB/s) | 0.61 s (4.8 GB/s) |
+| tool | input | time | GB/s |
+| --- | --- | --- | --- |
+| jx v0.1.0 `--selective`, x86-64-v3 build | array | 0.61 s | 4.80 |
+| jx v0.1.0 `--selective` | array | 0.80 s | 3.66 |
+| jx v0.1.0, x86-64-v3 build (checked) | array | 1.35 s | 2.15 |
+| simdjson 5.2.0 On-Demand, reads two fields | NDJSON | 1.47 s | 1.98 |
+| jx v0.1.0 (checked, the default) | array | 1.53 s | 1.90 |
+| simdjson 5.2.0 DOM | NDJSON | 1.81 s | 1.60 |
+| simdjson 5.2.0 On-Demand, every value | NDJSON | 2.06 s | 1.41 |
+| simdjson 5.2.0 On-Demand, reads two fields | array | 2.13 s | 1.37 |
+| yyjson 0.13.0 DOM | NDJSON | 2.29 s | 1.27 |
+| jaq 3.1.2 | NDJSON | 8.66 s | 0.34 |
+| jq 1.8.1 | NDJSON | 19.84 s | 0.15 |
+| gojq 0.12.20 | NDJSON | 25.38 s | 0.11 |
 
-simdjson 5.2 on the events as NDJSON, same session: On-Demand reading `type` and `repo.name` 0.54 s with the file already in memory (5.39 GB/s; 1.66 GB/s
-counting its own load of the file), DOM 0.90 s (3.23 GB/s in memory). jq 1.8.1 took 43 s and jaq 3.1.2 21 s in an earlier session (NDJSON).
+jx reads one document, so it gets the events as one array (`[ev, ev, ...]`); the others get them one per line. simdjson and yyjson are libraries: their
+rows are `bench/gharchive/ghbench.cpp` (g++ 13 `-O3 -march=native`), which loads the file with the library's loader, then counts the stars and
+distinct repos. jx maps its input file (Mitochondria v0.1.0, Linux), so reading costs almost nothing; the libraries copy it into memory first.
+"Checked" reads and validates every value as jq does; `--selective` skips objects and arrays the filter does not read ("How it works", above).
+jx before v0.1.0 (one byte at a time, input copied) took 4.67 s for the checked run.
 
 **529 MB document, stage3-shapefix build** (jx only, seconds / peak MB, one run each; jq and jaq numbers are the ones above): `.users[0].n` 0.2 / 554, `.users | length` 1.0 / 555, `select` 1.5 / 567, `{n: .n, c: .addr.city}` 4.4 / 940, `[label $o | .users[] | .age, break $o]` 1.4 / 802 (the label forces the whole array to be read as a value). `reduce .users[] as $u (0; . + $u.age)` fails on this document: `out of value memory at nesting depth 0` (the loop keeps 6.5 million element values; reduce over huge arrays is a known limit, fine on the 16 MB document).
 
