@@ -74,9 +74,9 @@ hello
 {"a":nan,"users":[]}
 ### rej_infinity
 {"a":Infinity,"users":[]}
-### rej_two_docs
+### s_two_docs
 {"a":1} {"a":2}
-### rej_two_scalars
+### s_two_scalars
 1 2
 ### s_bad_third
 {"users":[{"n":"a","age":1}]}
