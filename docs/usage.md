@@ -24,7 +24,7 @@ after the filter, long or short, combined (`-cr`): `-c`, `-r`, `-j`, `-n`, `-e`,
 and `--dump-program` are built; every other jq option is a hard error before anything is read, `jx: option '-S' is not supported yet` (`-S -C -L -b` and `--stream
 --stream-errors --sort-keys --color-output --raw-output0 --library-path --binary --build-configuration --strict`), `jx: unknown option '--bogus'` for anything else.
 Standard input is read only when the filter needs it (`stdin_text`, a Mitochondria runtime feature): `-n`, `--explain`, `--dump-program`, `--help`, `--version` and a
-run with an input file never wait for it. `jx --version` prints `jx 0.2` (jq prints `jq-1.8.2`); `--help` prints a short usage text of jx's own.
+run with an input file never wait for it. `jx --version` prints `jx 0.2.1` (jq prints `jq-1.8.2`); `--help` prints a short usage text of jx's own.
 `-s` collects every value into one array (no input at all gives `[]`; several values up to 16 MiB in all for now, one value of any size). `-a` writes every character above 127 as a `u`-escape (and with `-r` a string is still written quoted, as jq does); `--seq` writes
 a record separator (U+001E) before each result. `-S` is refused because document values are copied as spans and never parsed, so keys cannot be sorted
 without parsing every object; `-C` because the writer copies spans; `-L` (modules) by owner scope.
