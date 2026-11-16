@@ -3,7 +3,8 @@
 # Prints one table: per mode and reader, the best throughput with the file in memory and for the whole run (start, reading, scanning, printing).
 # One core (taskset), best of RUNS, the files in the page cache.
 #   in memory: simdjson and yyjson (libraries, run by ghbench.cpp): the best of RUNS parses in one process after the file is loaded.
-#              jx: the whole run minus the same binary's start-up (a filter that stops at once); jx maps its input file, so there is no load to remove.
+#              jx: the whole run minus the same binary's start-up (--first and a filter that stops at once); jx maps its input file, so there is
+#              no load to remove. Every reader gets the same NDJSON file; "jx ... (pipe)" rows read it through `cat |` (in pieces, fixed memory).
 #              jq, jaq and gojq read as they parse: no figure.
 # usage: bench/gharchive/run.sh   (Linux; needs curl, g++; jq, jaq and gojq are timed when on PATH)
 #   JX: the jx to time (default ./jx); JX_V3: an x86-64-v3 build (optional); CPU: the core (default 2); RUNS (default 5);
@@ -33,10 +34,15 @@ stars() { wc -l < out/r.txt; }
 row() { printf "| %s | %s | %s | %s | %s | %s |\n" "$@"; }
 echo "| Mode | Reader | Input | Best throughput, file in memory | Best throughput, whole run | Stars |"
 echo "| --- | --- | --- | --- | --- | --- |"
-# jx: whole runs, and start-up measured with a filter that ends at once
+# jx: whole runs, and start-up measured with --first and a filter that ends at once
 jxrow() { local mode=$1 name=$2 bin=$3; shift 3
-  local up=$(best $RUNS "$bin" "$@" '.[0].id' $A); local w=$(best $RUNS "$bin" "$@" "$S" $A); local st=$(stars)
-  row "$mode" "$name" array "$(gbs $(size $A) $((w - up)))" "$(gbs $(size $A) $w)" "$st"; }
+  local up=$(best $RUNS "$bin" "$@" --first '.type' $N); local w=$(best $RUNS "$bin" "$@" "$G" $N); local st=$(stars)
+  row "$mode" "$name" NDJSON "$(gbs $(size $N) $((w - up)))" "$(gbs $(size $N) $w)" "$st"; }
+# jx reading the file through a pipe (whole run only)
+# (only jx is pinned to the core; cat runs beside it, as in a real pipe)
+piperow() { local mode=$1 name=$2 bin=$3; shift 3
+  local b=999999999; for r in $(seq $RUNS); do local s=$(date +%s%N); cat $N | taskset -c $CPU "$bin" "$@" "$G" > out/r.txt 2> out/err.txt; local e=$(date +%s%N); local ms=$(( (e-s)/1000000 )); [ $ms -lt $b ] && b=$ms; done
+  row "$mode" "$name" "NDJSON (pipe)" "-" "$(gbs $(size $N) $b)" "$(stars)"; }
 # a library through ghbench: whole runs (one parse each), then RUNS parses in one process (its best)
 librow() { local mode=$1 name=$2 m=$3 f=$4 input=$5
   local w=$(best $RUNS ./ghbench $m $f 1); local st=$(grep -o 'stars [0-9]*' out/r.txt | tail -1 | cut -d' ' -f2)
@@ -46,10 +52,11 @@ librow() { local mode=$1 name=$2 m=$3 f=$4 input=$5
 clirow() { local name=$1 bin=$2; local w=$(best $SLOW_RUNS $bin "$G" $N); row Checked "$name" NDJSON "-" "$(gbs $(size $N) $w)" "$(stars)"; }
 [ -n "$JX_V3" ] && jxrow Selective "jx (x86-64-v3 build) --selective" "$JX_V3" --selective
 jxrow Selective "jx --selective" "$JX" --selective
+[ -n "$JX_V3" ] && piperow Selective "jx (x86-64-v3 build) --selective" "$JX_V3" --selective
 librow Selective "simdjson On-Demand (reads type, repo.name)" od-sel $N NDJSON
-librow Selective "simdjson On-Demand (reads type, repo.name)" od-sel-arr $A array
 [ -n "$JX_V3" ] && jxrow Checked "jx (x86-64-v3 build)" "$JX_V3"
 jxrow Checked "jx" "$JX"
+[ -n "$JX_V3" ] && piperow Checked "jx (x86-64-v3 build)" "$JX_V3"
 librow Checked "simdjson DOM" dom $N NDJSON
 librow Checked "simdjson On-Demand, full walk" od-full $N NDJSON
 librow Checked "yyjson DOM" yy $N NDJSON
